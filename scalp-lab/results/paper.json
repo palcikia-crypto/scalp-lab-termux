@@ -1,20 +1,7 @@
 {
  "capital_start": 1000.0,
- "equity": 1280.54590264894,
- "positions": {
-  "bollinger_reversion-DOTUSDT-15m": {
-   "strategy": "bollinger_reversion",
-   "symbol": "DOTUSDT",
-   "tf": "15m",
-   "signal": 1.0,
-   "entry": 0.843,
-   "opened": "2026-11-10 21:45:00",
-   "fee_mode": "maker",
-   "oos_sharpe": 1.73,
-   "last_ts": "2026-11-10 21:45:00",
-   "last_px": 0.843
-  }
- },
+ "equity": 1284.4627325540177,
+ "positions": {},
  "closed": [
   {
    "key": "bollinger_reversion-SUIUSDT-15m",
@@ -925,10 +912,24 @@
    "closed_ts": "2026-11-10 21:45:00",
    "fee_mode": "maker",
    "reason": "rotated out"
+  },
+  {
+   "key": "bollinger_reversion-DOTUSDT-15m",
+   "strategy": "bollinger_reversion",
+   "symbol": "DOTUSDT",
+   "tf": "15m",
+   "side": "long",
+   "entry": 0.843,
+   "exit": 0.846,
+   "pnl_pct": 0.3059,
+   "opened": "2026-11-10 21:45:00",
+   "closed_ts": "2026-11-10 22:00:00",
+   "fee_mode": "maker",
+   "reason": "flat signal"
   }
  ],
- "updated": "2026-11-10T22:12:28Z",
- "runs": 129,
+ "updated": "2026-11-10T22:16:48Z",
+ "runs": 130,
  "tops": [
   {
    "key": "wick_vol-APTUSDT-15m",
@@ -959,7 +960,7 @@
    "fee_mode": "maker",
    "oos_sharpe": 1.73,
    "score": 1.73,
-   "signal": 1.0,
+   "signal": 0.0,
    "sig_last": "2026-11-10 21:45:00",
    "sig_pct": 33.54
   },
@@ -982,24 +983,24 @@
   }
  ],
  "stats": {
-  "n_trades": 65,
-  "wins": 44,
-  "winrate": 67.7,
-  "equity": 1280.55,
-  "pnl_pct": 28.05,
-  "open": 1
+  "n_trades": 66,
+  "wins": 45,
+  "winrate": 68.2,
+  "equity": 1284.46,
+  "pnl_pct": 28.45,
+  "open": 0
  },
  "seen": {
-  "wick_vol-APTUSDT-15m": "2026-11-10 21:45:00",
-  "wick_vol-OPUSDT-15m": "2026-11-10 21:45:00",
-  "bollinger_reversion-DOTUSDT-15m": "2026-11-10 21:45:00"
+  "wick_vol-APTUSDT-15m": "2026-11-10 22:00:00",
+  "wick_vol-OPUSDT-15m": "2026-11-10 22:00:00",
+  "bollinger_reversion-DOTUSDT-15m": "2026-11-10 22:00:00"
  },
  "filter_stats": {
-  "total": 260,
+  "total": 300,
   "low_trades": 0,
   "low_folds": 0,
-  "low_pf": 241,
-  "low_t": 16,
+  "low_pf": 280,
+  "low_t": 17,
   "no_params": 0,
   "admitted": 3
  },
