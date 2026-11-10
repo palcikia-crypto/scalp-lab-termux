@@ -1,7 +1,20 @@
 {
  "capital_start": 1000.0,
  "equity": 1281.1864958968883,
- "positions": {},
+ "positions": {
+  "bollinger_reversion-DOTUSDT-15m": {
+   "strategy": "bollinger_reversion",
+   "symbol": "DOTUSDT",
+   "tf": "15m",
+   "signal": 1.0,
+   "entry": 0.843,
+   "opened": "2026-11-10 21:45:00",
+   "fee_mode": "maker",
+   "oos_sharpe": 1.73,
+   "last_ts": "2026-11-10 21:45:00",
+   "last_px": 0.843
+  }
+ },
  "closed": [
   {
    "key": "bollinger_reversion-SUIUSDT-15m",
@@ -900,8 +913,8 @@
    "reason": "rotated out"
   }
  ],
- "updated": "2026-11-10T22:01:12Z",
- "runs": 126,
+ "updated": "2026-11-10T22:05:22Z",
+ "runs": 127,
  "tops": [
   {
    "key": "wick_vol-APTUSDT-15m",
@@ -919,6 +932,22 @@
    "signal": 0.0,
    "sig_last": "2026-11-10 20:15:00",
    "sig_pct": 18.07
+  },
+  {
+   "key": "bollinger_reversion-DOTUSDT-15m",
+   "strategy": "bollinger_reversion",
+   "symbol": "DOTUSDT",
+   "tf": "15m",
+   "params": {
+    "k": 3.0,
+    "n": 50
+   },
+   "fee_mode": "maker",
+   "oos_sharpe": 1.73,
+   "score": 1.73,
+   "signal": 1.0,
+   "sig_last": "2026-11-10 21:45:00",
+   "sig_pct": 33.54
   },
   {
    "key": "wick_vol-OPUSDT-15m",
@@ -944,20 +973,21 @@
   "winrate": 68.8,
   "equity": 1281.19,
   "pnl_pct": 28.12,
-  "open": 0
+  "open": 1
  },
  "seen": {
   "wick_vol-APTUSDT-15m": "2026-11-10 21:45:00",
-  "wick_vol-OPUSDT-15m": "2026-11-10 21:45:00"
+  "wick_vol-OPUSDT-15m": "2026-11-10 21:45:00",
+  "bollinger_reversion-DOTUSDT-15m": "2026-11-10 21:45:00"
  },
  "filter_stats": {
-  "total": 140,
+  "total": 180,
   "low_trades": 0,
   "low_folds": 0,
-  "low_pf": 129,
-  "low_t": 9,
+  "low_pf": 160,
+  "low_t": 17,
   "no_params": 0,
-  "admitted": 2
+  "admitted": 3
  },
  "candidates": [
   {
@@ -981,6 +1011,16 @@
    "reason": "low_t"
   },
   {
+   "strategy": "bollinger_reversion",
+   "symbol": "ATOMUSDT",
+   "tf": "15m",
+   "sharpe": 1.28,
+   "t": 1.17,
+   "pf": 1.041,
+   "stability": 0.59,
+   "reason": "low_t"
+  },
+  {
    "strategy": "wick_vol",
    "symbol": "NEARUSDT",
    "tf": "1m",
@@ -1001,6 +1041,26 @@
    "reason": "low_t"
   },
   {
+   "strategy": "bollinger_reversion",
+   "symbol": "APTUSDT",
+   "tf": "5m",
+   "sharpe": 1.02,
+   "t": 0.97,
+   "pf": 1.014,
+   "stability": 0.3,
+   "reason": "low_t"
+  },
+  {
+   "strategy": "bollinger_reversion",
+   "symbol": "XRPUSDT",
+   "tf": "15m",
+   "sharpe": 1.02,
+   "t": 0.94,
+   "pf": 1.03,
+   "stability": 0.5,
+   "reason": "low_t"
+  },
+  {
    "strategy": "wick_vol",
    "symbol": "ARBUSDT",
    "tf": "5m",
@@ -1008,6 +1068,16 @@
    "t": 0.82,
    "pf": 1.015,
    "stability": 0.3,
+   "reason": "low_t"
+  },
+  {
+   "strategy": "bollinger_reversion",
+   "symbol": "ADAUSDT",
+   "tf": "5m",
+   "sharpe": 0.86,
+   "t": 0.81,
+   "pf": 1.014,
+   "stability": 0.51,
    "reason": "low_t"
   },
   {
@@ -1038,16 +1108,6 @@
    "t": 0.7,
    "pf": 1.013,
    "stability": 0.23,
-   "reason": "low_t"
-  },
-  {
-   "strategy": "wick_vol",
-   "symbol": "SUIUSDT",
-   "tf": "15m",
-   "sharpe": 0.51,
-   "t": 0.46,
-   "pf": 1.015,
-   "stability": 0.36,
    "reason": "low_t"
   }
  ]
