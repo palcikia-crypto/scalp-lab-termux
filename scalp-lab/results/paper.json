@@ -1,7 +1,20 @@
 {
  "capital_start": 1000.0,
  "equity": 1280.54590264894,
- "positions": {},
+ "positions": {
+  "bollinger_reversion-DOTUSDT-15m": {
+   "strategy": "bollinger_reversion",
+   "symbol": "DOTUSDT",
+   "tf": "15m",
+   "signal": 1.0,
+   "entry": 0.843,
+   "opened": "2026-11-10 21:45:00",
+   "fee_mode": "maker",
+   "oos_sharpe": 1.73,
+   "last_ts": "2026-11-10 21:45:00",
+   "last_px": 0.843
+  }
+ },
  "closed": [
   {
    "key": "bollinger_reversion-SUIUSDT-15m",
@@ -914,8 +927,8 @@
    "reason": "rotated out"
   }
  ],
- "updated": "2026-11-10T22:08:07Z",
- "runs": 128,
+ "updated": "2026-11-10T22:12:28Z",
+ "runs": 129,
  "tops": [
   {
    "key": "wick_vol-APTUSDT-15m",
@@ -933,6 +946,22 @@
    "signal": 0.0,
    "sig_last": "2026-11-10 20:15:00",
    "sig_pct": 18.07
+  },
+  {
+   "key": "bollinger_reversion-DOTUSDT-15m",
+   "strategy": "bollinger_reversion",
+   "symbol": "DOTUSDT",
+   "tf": "15m",
+   "params": {
+    "k": 3.0,
+    "n": 50
+   },
+   "fee_mode": "maker",
+   "oos_sharpe": 1.73,
+   "score": 1.73,
+   "signal": 1.0,
+   "sig_last": "2026-11-10 21:45:00",
+   "sig_pct": 33.54
   },
   {
    "key": "wick_vol-OPUSDT-15m",
@@ -958,20 +987,21 @@
   "winrate": 67.7,
   "equity": 1280.55,
   "pnl_pct": 28.05,
-  "open": 0
+  "open": 1
  },
  "seen": {
   "wick_vol-APTUSDT-15m": "2026-11-10 21:45:00",
-  "wick_vol-OPUSDT-15m": "2026-11-10 21:45:00"
+  "wick_vol-OPUSDT-15m": "2026-11-10 21:45:00",
+  "bollinger_reversion-DOTUSDT-15m": "2026-11-10 21:45:00"
  },
  "filter_stats": {
-  "total": 220,
+  "total": 260,
   "low_trades": 0,
   "low_folds": 0,
-  "low_pf": 201,
-  "low_t": 17,
+  "low_pf": 241,
+  "low_t": 16,
   "no_params": 0,
-  "admitted": 2
+  "admitted": 3
  },
  "candidates": [
   {
