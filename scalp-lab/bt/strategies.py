@@ -1,1 +1,1 @@
-Too many requests to this site right now. Wait before retrying, or open a different source.
+This page could not be read: the site blocked automated access or returned no readable content. Do not retry this URL; try a different source.
