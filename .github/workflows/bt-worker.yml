@@ -1,7 +1,7 @@
 name: bt-worker
 on:
   push:
-    branches: [master]
+    branches: [main]
   schedule:
     - cron: "23,53 * * * *"
   workflow_dispatch: {}
@@ -47,8 +47,8 @@ jobs:
           if git status --porcelain | grep -q .; then
             git commit -m "auto: worker progress [skip ci]" || echo "nothing to commit"
             git fetch origin || true
-            git rebase origin/master || { git rebase --abort 2>/dev/null || true; echo "rebase failed, will retry next run"; }
-            git push origin HEAD:master || echo "push failed, will retry next run"
+            git rebase origin/main || { git rebase --abort 2>/dev/null || true; echo "rebase failed, will retry next run"; }
+            git push origin HEAD:main || echo "push failed, will retry next run"
           else
             echo "nothing to commit"
           fi
@@ -70,8 +70,8 @@ jobs:
           if git status --porcelain | grep -q .; then
             git commit -m "auto: backtest results update [skip ci]" || echo "nothing to commit"
             git fetch origin || true
-            git rebase origin/master || { git rebase --abort 2>/dev/null || true; echo "rebase failed, will retry next run"; }
-            git push origin HEAD:master || echo "push failed, will retry next run"
+            git rebase origin/main || { git rebase --abort 2>/dev/null || true; echo "rebase failed, will retry next run"; }
+            git push origin HEAD:main || echo "push failed, will retry next run"
           else
             echo "nothing to commit"
           fi
@@ -85,7 +85,7 @@ jobs:
           echo "pending tasks: $PENDING"
           if [ "$PENDING" -gt 0 ] 2>/dev/null; then
             echo "work remains -> triggering next worker run"
-            gh workflow run bt-worker.yml --ref master || echo "self-trigger failed, cron will continue"
+            gh workflow run bt-worker.yml --ref main || echo "self-trigger failed, cron will continue"
           else
             echo "queue empty, waiting for cron"
           fi
