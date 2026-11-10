@@ -5,7 +5,7 @@ on:
   workflow_dispatch: {}
   push:
     branches: [main]
-    paths: ["dashboard/**"]
+    paths: ["dashboard/**", "scalp-lab/**"]
 permissions:
   contents: read
   pages: write
@@ -20,7 +20,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      - name: Build site (панель + данные одним доменом)
+        run: |
+          mkdir -p _site
+          cp -r dashboard/. _site/
+          cp -r scalp-lab _site/scalp-lab
+          ls _site | head -20
       - uses: actions/upload-pages-artifact@v3
-        with: { path: dashboard }
+        with: { path: _site }
       - id: deployment
         uses: actions/deploy-pages@v4

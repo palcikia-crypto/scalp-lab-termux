@@ -145,6 +145,22 @@ rd.flash-down { background:rgba(248,81,73,.16); }
 </style>
 </head>
 <body>
+<script>
+// Навигация и защита от ошибок — работает всегда, независимо от загрузки данных
+function showView(v) {
+  ["overview","candles","top","pat","paper","sys"].forEach(function (x) {
+    var el = document.getElementById("v-" + x), nav = document.getElementById("nav-" + x);
+    if (el) el.className = "view" + (x === v ? " on" : "");
+    if (nav) nav.className = x === v ? "on" : "";
+  });
+  window.scrollTo({ top: 0 });
+}
+window.onerror = function (msg, src, line) {
+  var d = document.getElementById("jserr");
+  if (d) { d.style.display = "block"; d.textContent = "JS: " + msg; }
+  return false;
+};
+</script>
 <div class="app">
   <div class="top">
     <div class="logo">🧪 Scalp<span>Lab</span> <span class="tag" style="font-size:10px">v9</span></div>
@@ -153,6 +169,7 @@ rd.flash-down { background:rgba(248,81,73,.16); }
       <button class="btn-r" onclick="refreshAll()" aria-label="Обновить">⟳</button>
     </div>
   </div>
+  <div id="jserr" style="display:none;color:#f85149;background:rgba(248,81,73,.12);border:1px solid rgba(248,81,73,.4);border-radius:10px;padding:8px 12px;margin:6px 0;font-size:12px"></div>
   <div class="upd" id="ticker">автообновление каждые 60 сек</div>
   <!-- ===== VIEW: OVERVIEW ===== -->
   <div class="view on" id="v-overview">
@@ -287,7 +304,7 @@ iv class="sort-row"><select id="arch-sort" onchange="archSel(this.value)">
 <script>
 var OWNER = "palcikia-crypto";
 var REPO = "scalp-lab-termux";
-var RAW = "https://raw.githubusercontent.com/" + OWNER + "/" + REPO + "/main/scalp-lab/";
+var RAW = "./scalp-lab/";
 var API = "https://api.github.com/repos/" + OWNER + "/" + REPO;
 var HAS_CHART = typeof Chart !== "unde
 fined";
@@ -380,7 +397,7 @@ function loadActivity() {
   }).catch(function () { commitsLog.innerHTML = ""; });
 }
 var QUEUE_FILES = ["queue.json","queue2.json","queue3.json","queue4.json","queue5.json","queue6.json","queue7.json","queue8.json","queue9.json","queue10.json","queue11.json","queue12.json","queue13.json","queue14.json","queue15.json","queue16.json",
-"queue17.json","queue18.json","queue19.json","queue20.json"];
+"queue17.json","queue18.json","queue19.json","queue20.json","queue21.json","queue22.json","queue23.json","queue24.json","queue25.json","queue26.json","queue27.json","queue28.json","queue29.json","queue30.json","queue31.json","queue32.json","queue33.json","queue34.json","queue35.json"];
 function loadQueue() {
   return Promise.all(QUEUE_FILES.map(function (f) { return fetchText(RAW + "results/" + f); })).then(function (arr) {
     var s = {}, total = 0, first = null;
