@@ -956,8 +956,8 @@
    "reason": "flat signal"
   }
  ],
- "updated": "2026-11-10T23:40:37Z",
- "runs": 149,
+ "updated": "2026-11-10T23:42:55Z",
+ "runs": 150,
  "tops": [
   {
    "key": "wick_vol-APTUSDT-15m",
@@ -1061,15 +1061,35 @@
   "spike_revert-SUIUSDT-15m": "2026-11-10 23:15:00"
  },
  "filter_stats": {
-  "total": 960,
-  "low_trades": 138,
+  "total": 1000,
+  "low_trades": 171,
   "low_folds": 0,
-  "low_pf": 758,
-  "low_t": 59,
+  "low_pf": 760,
+  "low_t": 64,
   "no_params": 0,
   "admitted": 5
  },
  "candidates": [
+  {
+   "strategy": "spike_bb",
+   "symbol": "ATOMUSDT",
+   "tf": "1m",
+   "sharpe": 4.28,
+   "t": 2.79,
+   "pf": 1.282,
+   "stability": 0.45,
+   "reason": "low_trades"
+  },
+  {
+   "strategy": "spike_bb",
+   "symbol": "LINKUSDT",
+   "tf": "1m",
+   "sharpe": 2.82,
+   "t": 1.84,
+   "pf": 1.2,
+   "stability": 0.32,
+   "reason": "low_trades"
+  },
   {
    "strategy": "crash_revert",
    "symbol": "XRPUSDT",
@@ -1131,6 +1151,16 @@
    "reason": "low_trades"
   },
   {
+   "strategy": "spike_bb",
+   "symbol": "FILUSDT",
+   "tf": "1m",
+   "sharpe": 2.12,
+   "t": 1.38,
+   "pf": 1.125,
+   "stability": 0.45,
+   "reason": "low_trades"
+  },
+  {
    "strategy": "spike_follow",
    "symbol": "SOLUSDT",
    "tf": "1m",
@@ -1159,36 +1189,6 @@
    "pf": 1.011,
    "stability": 0.26,
    "reason": "low_t"
-  },
-  {
-   "strategy": "crash_revert",
-   "symbol": "BTCUSDT",
-   "tf": "5m",
-   "sharpe": 1.81,
-   "t": 1.72,
-   "pf": 1.454,
-   "stability": 0.57,
-   "reason": "low_trades"
-  },
-  {
-   "strategy": "spike_follow",
-   "symbol": "BTCUSDT",
-   "tf": "15m",
-   "sharpe": 1.8,
-   "t": 1.66,
-   "pf": 1.123,
-   "stability": 0.18,
-   "reason": "low_trades"
-  },
-  {
-   "strategy": "crash_revert",
-   "symbol": "SUIUSDT",
-   "tf": "5m",
-   "sharpe": 1.7,
-   "t": 1.61,
-   "pf": 1.13,
-   "stability": 0.21,
-   "reason": "low_trades"
   }
  ]
 }
