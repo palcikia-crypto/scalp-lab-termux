@@ -941,8 +941,8 @@
    "reason": "flat signal"
   }
  ],
- "updated": "2026-11-10T23:18:08Z",
- "runs": 144,
+ "updated": "2026-11-10T23:21:07Z",
+ "runs": 145,
  "tops": [
   {
    "key": "wick_vol-APTUSDT-15m",
@@ -1028,11 +1028,11 @@
   "bb_vol-LTCUSDT-15m": "2026-11-10 23:00:00"
  },
  "filter_stats": {
-  "total": 780,
-  "low_trades": 0,
+  "total": 820,
+  "low_trades": 36,
   "low_folds": 0,
-  "low_pf": 724,
-  "low_t": 52,
+  "low_pf": 727,
+  "low_t": 53,
   "no_params": 0,
   "admitted": 4
  },
@@ -1138,14 +1138,14 @@
    "reason": "low_t"
   },
   {
-   "strategy": "bb_vol",
-   "symbol": "PEPEUSDT",
-   "tf": "15m",
+   "strategy": "spike_revert",
+   "symbol": "DOTUSDT",
+   "tf": "1m",
    "sharpe": 1.19,
-   "t": 1.09,
-   "pf": 1.039,
-   "stability": 0.18,
-   "reason": "low_t"
+   "t": 0.78,
+   "pf": 1.121,
+   "stability": 0.45,
+   "reason": "low_trades"
   },
   {
    "strategy": "wick_vol",
