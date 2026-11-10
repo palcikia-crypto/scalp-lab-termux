@@ -1,1 +1,5 @@
-This page could not be read: the site blocked automated access or returned no readable content. Do not retry this URL; try a different source.
+#!/data/data/com.termux/files/usr/bin/sh
+git add .
+git commit -m "Автообновление с телефона: $(date +"%Y-%m-%d %H:%M")"
+git push origin master
+termux-toast "Успешно обновлено на GitHub!"
