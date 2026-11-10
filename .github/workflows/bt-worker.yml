@@ -62,8 +62,7 @@ jobs:
         if: always()
         working-directory: scalp-lab
         run: |
-  
-        git config user.name "bt-bot"
+          git config user.name "bt-bot"
           git config user.email "bt-bot@users.noreply.github.com"
           git add results 2>/dev/null || true
           git add reports 2>/dev/null || true
