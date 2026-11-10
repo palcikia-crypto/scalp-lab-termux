@@ -928,8 +928,8 @@
    "reason": "flat signal"
   }
  ],
- "updated": "2026-11-10T22:29:47Z",
- "runs": 134,
+ "updated": "2026-11-10T22:38:29Z",
+ "runs": 135,
  "tops": [
   {
    "key": "wick_vol-APTUSDT-15m",
@@ -991,16 +991,16 @@
   "open": 0
  },
  "seen": {
-  "wick_vol-APTUSDT-15m": "2026-11-10 22:00:00",
-  "wick_vol-OPUSDT-15m": "2026-11-10 22:00:00",
-  "bollinger_reversion-DOTUSDT-15m": "2026-11-10 22:00:00"
+  "wick_vol-APTUSDT-15m": "2026-11-10 22:15:00",
+  "wick_vol-OPUSDT-15m": "2026-11-10 22:15:00",
+  "bollinger_reversion-DOTUSDT-15m": "2026-11-10 22:15:00"
  },
  "filter_stats": {
-  "total": 460,
+  "total": 480,
   "low_trades": 0,
   "low_folds": 0,
-  "low_pf": 434,
-  "low_t": 23,
+  "low_pf": 453,
+  "low_t": 24,
   "no_params": 0,
   "admitted": 3
  },
@@ -1023,6 +1023,16 @@
    "t": 1.25,
    "pf": 1.024,
    "stability": 0.26,
+   "reason": "low_t"
+  },
+  {
+   "strategy": "vol_drift",
+   "symbol": "PEPEUSDT",
+   "tf": "15m",
+   "sharpe": 1.25,
+   "t": 1.14,
+   "pf": 1.032,
+   "stability": 0.27,
    "reason": "low_t"
   },
   {
@@ -1113,16 +1123,6 @@
    "t": 0.81,
    "pf": 1.014,
    "stability": 0.51,
-   "reason": "low_t"
-  },
-  {
-   "strategy": "wick_vol",
-   "symbol": "NEARUSDT",
-   "tf": "5m",
-   "sharpe": 0.76,
-   "t": 0.72,
-   "pf": 1.013,
-   "stability": 0.17,
    "reason": "low_t"
   }
  ]
