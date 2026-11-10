@@ -900,8 +900,8 @@
    "reason": "rotated out"
   }
  ],
- "updated": "2026-11-10T21:56:49Z",
- "runs": 125,
+ "updated": "2026-11-10T22:01:12Z",
+ "runs": 126,
  "tops": [
   {
    "key": "wick_vol-APTUSDT-15m",
@@ -947,14 +947,14 @@
   "open": 0
  },
  "seen": {
-  "wick_vol-APTUSDT-15m": "2026-11-10 21:30:00",
-  "wick_vol-OPUSDT-15m": "2026-11-10 21:30:00"
+  "wick_vol-APTUSDT-15m": "2026-11-10 21:45:00",
+  "wick_vol-OPUSDT-15m": "2026-11-10 21:45:00"
  },
  "filter_stats": {
-  "total": 100,
+  "total": 140,
   "low_trades": 0,
   "low_folds": 0,
-  "low_pf": 89,
+  "low_pf": 129,
   "low_t": 9,
   "no_params": 0,
   "admitted": 2
