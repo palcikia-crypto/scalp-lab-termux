@@ -1,2 +1,1 @@
 strategy,symbol,tf,oos_sharpe,oos_pf,oos_t,trades,param_stability,is_sharpe_avg,folds,fee_mode,maker_sharpe,maker_pf,daily_pct,monthly_pct,trades_per_day,usd_per_month_1000
-wick_vol,FILUSDT,5m,1.314,1.024,1.25,1383,0.26,3.78,47,maker,1.313917882028655,1.0239856143991122,0.001474,0.045186,3.79,45.19
