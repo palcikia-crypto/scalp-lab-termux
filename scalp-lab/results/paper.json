@@ -900,9 +900,44 @@
    "reason": "rotated out"
   }
  ],
- "updated": "2026-11-10T21:48:49Z",
- "runs": 124,
- "tops": [],
+ "updated": "2026-11-10T21:56:49Z",
+ "runs": 125,
+ "tops": [
+  {
+   "key": "wick_vol-APTUSDT-15m",
+   "strategy": "wick_vol",
+   "symbol": "APTUSDT",
+   "tf": "15m",
+   "params": {
+    "h": 15,
+    "vz": 2.0,
+    "w": 0.5
+   },
+   "fee_mode": "maker",
+   "oos_sharpe": 3.13,
+   "score": 3.13,
+   "signal": 0.0,
+   "sig_last": "2026-11-10 20:15:00",
+   "sig_pct": 18.07
+  },
+  {
+   "key": "wick_vol-OPUSDT-15m",
+   "strategy": "wick_vol",
+   "symbol": "OPUSDT",
+   "tf": "15m",
+   "params": {
+    "h": 30,
+    "vz": 3.0,
+    "w": 0.4
+   },
+   "fee_mode": "maker",
+   "oos_sharpe": 1.92,
+   "score": 1.24,
+   "signal": 0.0,
+   "sig_last": "2026-11-07 19:30:00",
+   "sig_pct": 12.16
+  }
+ ],
  "stats": {
   "n_trades": 64,
   "wins": 44,
@@ -911,17 +946,40 @@
   "pnl_pct": 28.12,
   "open": 0
  },
- "seen": {},
+ "seen": {
+  "wick_vol-APTUSDT-15m": "2026-11-10 21:30:00",
+  "wick_vol-OPUSDT-15m": "2026-11-10 21:30:00"
+ },
  "filter_stats": {
-  "total": 80,
+  "total": 100,
   "low_trades": 0,
   "low_folds": 0,
-  "low_pf": 77,
-  "low_t": 3,
+  "low_pf": 89,
+  "low_t": 9,
   "no_params": 0,
-  "admitted": 0
+  "admitted": 2
  },
  "candidates": [
+  {
+   "strategy": "wick_vol",
+   "symbol": "AVAXUSDT",
+   "tf": "15m",
+   "sharpe": 1.31,
+   "t": 1.2,
+   "pf": 1.044,
+   "stability": 0.18,
+   "reason": "low_t"
+  },
+  {
+   "strategy": "wick_vol",
+   "symbol": "FILUSDT",
+   "tf": "5m",
+   "sharpe": 1.31,
+   "t": 1.25,
+   "pf": 1.024,
+   "stability": 0.26,
+   "reason": "low_t"
+  },
   {
    "strategy": "wick_vol",
    "symbol": "NEARUSDT",
@@ -931,6 +989,16 @@
    "pf": 1.009,
    "stability": 0.23,
    "reason": "low_pf"
+  },
+  {
+   "strategy": "wick_vol",
+   "symbol": "BNBUSDT",
+   "tf": "15m",
+   "sharpe": 1.04,
+   "t": 0.96,
+   "pf": 1.04,
+   "stability": 0.23,
+   "reason": "low_t"
   },
   {
    "strategy": "wick_vol",
@@ -954,12 +1022,32 @@
   },
   {
    "strategy": "wick_vol",
+   "symbol": "UNIUSDT",
+   "tf": "15m",
+   "sharpe": 0.75,
+   "t": 0.69,
+   "pf": 1.026,
+   "stability": 0.18,
+   "reason": "low_t"
+  },
+  {
+   "strategy": "wick_vol",
    "symbol": "ADAUSDT",
    "tf": "5m",
    "sharpe": 0.74,
    "t": 0.7,
    "pf": 1.013,
    "stability": 0.23,
+   "reason": "low_t"
+  },
+  {
+   "strategy": "wick_vol",
+   "symbol": "SUIUSDT",
+   "tf": "15m",
+   "sharpe": 0.51,
+   "t": 0.46,
+   "pf": 1.015,
+   "stability": 0.36,
    "reason": "low_t"
   }
  ]
