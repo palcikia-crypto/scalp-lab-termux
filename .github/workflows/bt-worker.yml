@@ -1,0 +1,91 @@
+name: bt-worker
+on:
+  push:
+    branches: [master]
+  schedule:
+    - cron: "23,53 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: bt-worker
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: scalp-lab/requirements.txt
+      - run: pip install -r requirements.txt
+        working-directory: scalp-lab
+      - uses: actions/cache@v4
+        with:
+          path: scalp-lab/.cache
+          key: bt-cache-v3
+      - run: |
+          mkdir -p reports
+          timeout 2100 python worker.py --budget 32 || echo "worker stopped (budget/cap)"
+        working-directory: scalp-lab
+        continue-on-error: true
+      - name: Commit worker progress
+        if: always()
+        working-directory: scalp-lab
+        run: |
+          git config user.name "bt-bot"
+          git config user.email "bt-bot@users.noreply.github.com"
+          git add results 2>/dev/null || true
+          git add reports 2>/dev/null || true
+          if git status --porcelain | grep -q .; then
+            git commit -m "auto: worker progress [skip ci]" || echo "nothing to commit"
+            git fetch origin || true
+            git rebase origin/master || { git rebase --abort 2>/dev/null || true; echo "rebase failed, will retry next run"; }
+            git push origin HEAD:master || echo "push failed, will retry next run"
+          else
+            echo "nothing to commit"
+          fi
+      - run: timeout 120 python reporter.py || true
+        working-directory: scalp-lab
+        continue-on-error: true
+      - run: timeout 180 python paper.py || true
+        working-directory: scalp-lab
+        continue-on-error: true
+      - name: Commit paper results
+        if: always()
+        working-directory: scalp-lab
+        run: |
+  
+        git config user.name "bt-bot"
+          git config user.email "bt-bot@users.noreply.github.com"
+          git add results 2>/dev/null || true
+          git add reports 2>/dev/null || true
+          if git status --porcelain | grep -q .; then
+            git commit -m "auto: backtest results update [skip ci]" || echo "nothing to commit"
+            git fetch origin || true
+            git rebase origin/master || { git rebase --abort 2>/dev/null || true; echo "rebase failed, will retry next run"; }
+            git push origin HEAD:master || echo "push failed, will retry next run"
+          else
+            echo "nothing to commit"
+          fi
+      - name: Self-trigger next run if work remains
+        if: always()
+        working-directory: scalp-lab
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PENDING=$(jq -r '.pending // 0' results/progress.json 2>/dev/null || echo 0)
+          echo "pending tasks: $PENDING"
+          if [ "$PENDING" -gt 0 ] 2>/dev/null; then
+            echo "work remains -> triggering next worker run"
+            gh workflow run bt-worker.yml --ref master || echo "self-trigger failed, cron will continue"
+          else
+            echo "queue empty, waiting for cron"
+          fi

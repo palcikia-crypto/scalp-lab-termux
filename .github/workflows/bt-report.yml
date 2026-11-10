@@ -1,0 +1,39 @@
+name: bt-report
+on:
+  schedule:
+    - cron: "40 5 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bt-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: scalp-lab/requirements.txt
+      - run: pip install -r requirements.txt
+        working-directory: scalp-lab
+      - run: python reporter.py
+        working-directory: scalp-lab
+        continue-on-error: true
+      - name: Commit report
+        if: always()
+        working-directory: scalp-lab
+        run: |
+          git config user.name "bt-bot"
+          git config user.email "bt-bot@users.noreply.github.com"
+          git add reports
+          git commit -m "auto: report update [skip ci]" || echo "nothing to commit"
+          git pull --rebase origin master || true
+          git push || echo "push failed, will retry next run"
