@@ -928,8 +928,8 @@
    "reason": "flat signal"
   }
  ],
- "updated": "2026-11-10T22:48:44Z",
- "runs": 138,
+ "updated": "2026-11-10T22:50:26Z",
+ "runs": 139,
  "tops": [
   {
    "key": "wick_vol-APTUSDT-15m",
@@ -996,15 +996,55 @@
   "bollinger_reversion-DOTUSDT-15m": "2026-11-10 22:30:00"
  },
  "filter_stats": {
-  "total": 600,
+  "total": 640,
   "low_trades": 0,
   "low_folds": 0,
-  "low_pf": 573,
-  "low_t": 24,
+  "low_pf": 609,
+  "low_t": 28,
   "no_params": 0,
   "admitted": 3
  },
  "candidates": [
+  {
+   "strategy": "bb_maker",
+   "symbol": "NEARUSDT",
+   "tf": "1m",
+   "sharpe": 1.89,
+   "t": 1.23,
+   "pf": 1.011,
+   "stability": 0.26,
+   "reason": "low_t"
+  },
+  {
+   "strategy": "bb_maker",
+   "symbol": "ATOMUSDT",
+   "tf": "1m",
+   "sharpe": 1.45,
+   "t": 0.94,
+   "pf": 1.008,
+   "stability": 0.32,
+   "reason": "low_pf"
+  },
+  {
+   "strategy": "bb_maker",
+   "symbol": "NEARUSDT",
+   "tf": "5m",
+   "sharpe": 1.35,
+   "t": 1.28,
+   "pf": 1.017,
+   "stability": 0.45,
+   "reason": "low_t"
+  },
+  {
+   "strategy": "bb_maker",
+   "symbol": "DOTUSDT",
+   "tf": "1m",
+   "sharpe": 1.34,
+   "t": 0.87,
+   "pf": 1.008,
+   "stability": 0.35,
+   "reason": "low_pf"
+  },
   {
    "strategy": "wick_vol",
    "symbol": "AVAXUSDT",
@@ -1023,6 +1063,16 @@
    "t": 1.25,
    "pf": 1.024,
    "stability": 0.26,
+   "reason": "low_t"
+  },
+  {
+   "strategy": "bollinger_reversion",
+   "symbol": "ATOMUSDT",
+   "tf": "15m",
+   "sharpe": 1.28,
+   "t": 1.17,
+   "pf": 1.041,
+   "stability": 0.59,
    "reason": "low_t"
   },
   {
@@ -1056,6 +1106,16 @@
    "reason": "low_t"
   },
   {
+   "strategy": "bb_maker",
+   "symbol": "APTUSDT",
+   "tf": "1m",
+   "sharpe": 1.13,
+   "t": 0.73,
+   "pf": 1.007,
+   "stability": 0.55,
+   "reason": "low_pf"
+  },
+  {
    "strategy": "vwap_reversion",
    "symbol": "ATOMUSDT",
    "tf": "5m",
@@ -1063,66 +1123,6 @@
    "t": 1.02,
    "pf": 1.019,
    "stability": 0.32,
-   "reason": "low_t"
-  },
-  {
-   "strategy": "streak_reversion",
-   "symbol": "ATOMUSDT",
-   "tf": "15m",
-   "sharpe": 1.07,
-   "t": 0.98,
-   "pf": 1.017,
-   "stability": 0.32,
-   "reason": "low_t"
-  },
-  {
-   "strategy": "wick_vol",
-   "symbol": "BNBUSDT",
-   "tf": "15m",
-   "sharpe": 1.04,
-   "t": 0.96,
-   "pf": 1.04,
-   "stability": 0.23,
-   "reason": "low_t"
-  },
-  {
-   "strategy": "bollinger_reversion",
-   "symbol": "APTUSDT",
-   "tf": "5m",
-   "sharpe": 1.02,
-   "t": 0.97,
-   "pf": 1.014,
-   "stability": 0.3,
-   "reason": "low_t"
-  },
-  {
-   "strategy": "bollinger_reversion",
-   "symbol": "XRPUSDT",
-   "tf": "15m",
-   "sharpe": 1.02,
-   "t": 0.94,
-   "pf": 1.03,
-   "stability": 0.5,
-   "reason": "low_t"
-  },
-  {
-   "strategy": "wick_vol",
-   "symbol": "ARBUSDT",
-   "tf": "5m",
-   "sharpe": 0.86,
-   "t": 0.82,
-   "pf": 1.015,
-   "stability": 0.3,
-   "reason": "low_t"
-  },
-  {
-   "strategy": "bollinger_reversion",
-   "symbol": "ADAUSDT",
-   "tf": "5m",
-   "sharpe": 0.86,
-   "t": 0.81,
-   "pf": 1.014,
-   "stability": 0.51,
    "reason": "low_t"
   }
  ]
