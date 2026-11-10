@@ -956,8 +956,8 @@
    "reason": "flat signal"
   }
  ],
- "updated": "2026-11-10T23:47:11Z",
- "runs": 151,
+ "updated": "2026-11-10T23:52:13Z",
+ "runs": 152,
  "tops": [
   {
    "key": "wick_vol-APTUSDT-15m",
@@ -1061,11 +1061,11 @@
   "spike_revert-SUIUSDT-15m": "2026-11-10 23:30:00"
  },
  "filter_stats": {
-  "total": 1040,
+  "total": 1080,
   "low_trades": 185,
   "low_folds": 0,
-  "low_pf": 783,
-  "low_t": 67,
+  "low_pf": 817,
+  "low_t": 73,
   "no_params": 0,
   "admitted": 5
  },
