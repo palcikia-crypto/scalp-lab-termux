@@ -928,8 +928,8 @@
    "reason": "flat signal"
   }
  ],
- "updated": "2026-11-10T22:28:04Z",
- "runs": 133,
+ "updated": "2026-11-10T22:29:47Z",
+ "runs": 134,
  "tops": [
   {
    "key": "wick_vol-APTUSDT-15m",
@@ -996,11 +996,11 @@
   "bollinger_reversion-DOTUSDT-15m": "2026-11-10 22:00:00"
  },
  "filter_stats": {
-  "total": 420,
+  "total": 460,
   "low_trades": 0,
   "low_folds": 0,
-  "low_pf": 393,
-  "low_t": 24,
+  "low_pf": 434,
+  "low_t": 23,
   "no_params": 0,
   "admitted": 3
  },
@@ -1026,16 +1026,6 @@
    "reason": "low_t"
   },
   {
-   "strategy": "bollinger_reversion",
-   "symbol": "ATOMUSDT",
-   "tf": "15m",
-   "sharpe": 1.28,
-   "t": 1.17,
-   "pf": 1.041,
-   "stability": 0.59,
-   "reason": "low_t"
-  },
-  {
    "strategy": "wick_vol",
    "symbol": "NEARUSDT",
    "tf": "1m",
@@ -1044,6 +1034,16 @@
    "pf": 1.009,
    "stability": 0.23,
    "reason": "low_pf"
+  },
+  {
+   "strategy": "vwap_reversion",
+   "symbol": "LTCUSDT",
+   "tf": "15m",
+   "sharpe": 1.15,
+   "t": 1.05,
+   "pf": 1.034,
+   "stability": 0.36,
+   "reason": "low_t"
   },
   {
    "strategy": "vwap_reversion",
