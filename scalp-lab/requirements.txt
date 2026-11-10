@@ -1,1 +1,3 @@
-Too many requests to this site right now. Wait before retrying, or open a different source.
+pandas>=2.0
+numpy>=1.24
+requests>=2.31

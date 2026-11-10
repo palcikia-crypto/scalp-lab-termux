@@ -1,1 +1,3 @@
-Too many requests to this site right now. Wait before retrying, or open a different source.
+# Мой проект, созданный прямо с телефона через Termux!
+Привет GitHub! Я пишу код прямо с телефона через Termux.
+Привет GitHub! Я пишу код прямо с телефона через Termux.
