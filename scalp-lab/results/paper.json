@@ -900,8 +900,8 @@
    "reason": "rotated out"
   }
  ],
- "updated": "2026-11-10T21:38:17Z",
- "runs": 122,
+ "updated": "2026-11-10T21:46:23Z",
+ "runs": 123,
  "tops": [],
  "stats": {
   "n_trades": 64,
@@ -913,13 +913,64 @@
  },
  "seen": {},
  "filter_stats": {
-  "total": 0,
+  "total": 40,
   "low_trades": 0,
   "low_folds": 0,
-  "low_pf": 0,
-  "low_t": 0,
+  "low_pf": 36,
+  "low_t": 4,
   "no_params": 0,
   "admitted": 0
  },
- "candidates": []
+ "candidates": [
+  {
+   "strategy": "wick_vol",
+   "symbol": "FILUSDT",
+   "tf": "5m",
+   "sharpe": 1.31,
+   "t": 1.25,
+   "pf": 1.024,
+   "stability": 0.26,
+   "reason": "low_t"
+  },
+  {
+   "strategy": "wick_vol",
+   "symbol": "NEARUSDT",
+   "tf": "1m",
+   "sharpe": 1.17,
+   "t": 0.76,
+   "pf": 1.009,
+   "stability": 0.23,
+   "reason": "low_pf"
+  },
+  {
+   "strategy": "wick_vol",
+   "symbol": "ARBUSDT",
+   "tf": "5m",
+   "sharpe": 0.86,
+   "t": 0.82,
+   "pf": 1.015,
+   "stability": 0.3,
+   "reason": "low_t"
+  },
+  {
+   "strategy": "wick_vol",
+   "symbol": "NEARUSDT",
+   "tf": "5m",
+   "sharpe": 0.76,
+   "t": 0.72,
+   "pf": 1.013,
+   "stability": 0.17,
+   "reason": "low_t"
+  },
+  {
+   "strategy": "wick_vol",
+   "symbol": "ADAUSDT",
+   "tf": "5m",
+   "sharpe": 0.74,
+   "t": 0.7,
+   "pf": 1.013,
+   "stability": 0.23,
+   "reason": "low_t"
+  }
+ ]
 }
