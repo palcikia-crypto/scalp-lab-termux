@@ -928,8 +928,8 @@
    "reason": "flat signal"
   }
  ],
- "updated": "2026-11-10T22:40:23Z",
- "runs": 136,
+ "updated": "2026-11-10T22:44:43Z",
+ "runs": 137,
  "tops": [
   {
    "key": "wick_vol-APTUSDT-15m",
@@ -996,10 +996,10 @@
   "bollinger_reversion-DOTUSDT-15m": "2026-11-10 22:15:00"
  },
  "filter_stats": {
-  "total": 520,
+  "total": 560,
   "low_trades": 0,
   "low_folds": 0,
-  "low_pf": 493,
+  "low_pf": 533,
   "low_t": 24,
   "no_params": 0,
   "admitted": 3
