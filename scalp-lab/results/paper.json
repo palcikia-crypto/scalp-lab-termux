@@ -11,8 +11,8 @@
    "opened": "2026-11-11 00:40:00",
    "fee_mode": "maker",
    "oos_sharpe": 1.78,
-   "last_ts": "2026-11-11 00:40:00",
-   "last_px": 0.1606
+   "last_ts": "2026-11-11 00:45:00",
+   "last_px": 0.1609
   }
  },
  "closed": [
@@ -969,8 +969,8 @@
    "reason": "flat signal"
   }
  ],
- "updated": "2026-11-11T00:48:42Z",
- "runs": 156,
+ "updated": "2026-11-11T00:54:20Z",
+ "runs": 157,
  "tops": [
   {
    "key": "wick_vol-APTUSDT-15m",
@@ -1036,8 +1036,8 @@
    "oos_sharpe": 1.78,
    "score": 1.41,
    "signal": 1.0,
-   "sig_last": "2026-11-11 00:40:00",
-   "sig_pct": 51.07
+   "sig_last": "2026-11-11 00:45:00",
+   "sig_pct": 51.12
   },
   {
    "key": "wick_vol-OPUSDT-15m",
@@ -1089,14 +1089,14 @@
   "bollinger_reversion-DOTUSDT-15m": "2026-11-11 00:30:00",
   "bb_vol-LTCUSDT-15m": "2026-11-11 00:30:00",
   "spike_revert-SUIUSDT-15m": "2026-11-11 00:30:00",
-  "bb_regime-ARBUSDT-5m": "2026-11-11 00:40:00"
+  "bb_regime-ARBUSDT-5m": "2026-11-11 00:45:00"
  },
  "filter_stats": {
-  "total": 1180,
+  "total": 1220,
   "low_trades": 225,
   "low_folds": 0,
-  "low_pf": 865,
-  "low_t": 84,
+  "low_pf": 907,
+  "low_t": 82,
   "no_params": 0,
   "admitted": 6
  },
