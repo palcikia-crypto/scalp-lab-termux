@@ -956,8 +956,8 @@
    "reason": "flat signal"
   }
  ],
- "updated": "2026-11-11T00:26:45Z",
- "runs": 154,
+ "updated": "2026-11-11T00:44:11Z",
+ "runs": 155,
  "tops": [
   {
    "key": "wick_vol-APTUSDT-15m",
@@ -1054,15 +1054,15 @@
   "open": 0
  },
  "seen": {
-  "wick_vol-APTUSDT-15m": "2026-11-11 00:00:00",
-  "wick_vol-OPUSDT-15m": "2026-11-11 00:00:00",
-  "bollinger_reversion-DOTUSDT-15m": "2026-11-11 00:00:00",
-  "bb_vol-LTCUSDT-15m": "2026-11-11 00:00:00",
-  "spike_revert-SUIUSDT-15m": "2026-11-11 00:00:00"
+  "wick_vol-APTUSDT-15m": "2026-11-11 00:15:00",
+  "wick_vol-OPUSDT-15m": "2026-11-11 00:15:00",
+  "bollinger_reversion-DOTUSDT-15m": "2026-11-11 00:15:00",
+  "bb_vol-LTCUSDT-15m": "2026-11-11 00:15:00",
+  "spike_revert-SUIUSDT-15m": "2026-11-11 00:15:00"
  },
  "filter_stats": {
-  "total": 1120,
-  "low_trades": 205,
+  "total": 1140,
+  "low_trades": 225,
   "low_folds": 0,
   "low_pf": 832,
   "low_t": 78,
