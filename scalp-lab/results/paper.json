@@ -1,19 +1,7 @@
 {
  "capital_start": 1000.0,
- "equity": 1289.353167119463,
+ "equity": 1301.5538521012281,
  "positions": {
-  "bb_regime-ARBUSDT-5m": {
-   "strategy": "bb_regime",
-   "symbol": "ARBUSDT",
-   "tf": "5m",
-   "signal": 1.0,
-   "entry": 0.1606,
-   "opened": "2026-11-11 00:40:00",
-   "fee_mode": "maker",
-   "oos_sharpe": 1.78,
-   "last_ts": "2026-11-11 00:50:00",
-   "last_px": 0.1613
-  },
   "streak_bb-SUIUSDT-5m": {
    "strategy": "streak_bb",
    "symbol": "SUIUSDT",
@@ -23,8 +11,8 @@
    "opened": "2026-11-11 00:50:00",
    "fee_mode": "maker",
    "oos_sharpe": 2.16,
-   "last_ts": "2026-11-11 00:50:00",
-   "last_px": 0.8271
+   "last_ts": "2026-11-11 01:25:00",
+   "last_px": 0.8323
   }
  },
  "closed": [
@@ -979,10 +967,24 @@
    "closed_ts": "2026-11-10 23:15:00",
    "fee_mode": "maker",
    "reason": "flat signal"
+  },
+  {
+   "key": "bb_regime-ARBUSDT-5m",
+   "strategy": "bb_regime",
+   "symbol": "ARBUSDT",
+   "tf": "5m",
+   "side": "long",
+   "entry": 0.1606,
+   "exit": 0.1622,
+   "pnl_pct": 0.9463,
+   "opened": "2026-11-11 00:40:00",
+   "closed_ts": "2026-11-11 01:10:00",
+   "fee_mode": "maker",
+   "reason": "flat signal"
   }
  ],
- "updated": "2026-11-11T00:59:44Z",
- "runs": 161,
+ "updated": "2026-11-11T01:30:56Z",
+ "runs": 162,
  "tops": [
   {
    "key": "wick_vol-APTUSDT-15m",
@@ -1015,8 +1017,8 @@
    "oos_sharpe": 2.16,
    "score": 2.16,
    "signal": -1.0,
-   "sig_last": "2026-11-11 00:50:00",
-   "sig_pct": 87.79
+   "sig_last": "2026-11-11 01:25:00",
+   "sig_pct": 86.8
   },
   {
    "key": "bollinger_reversion-DOTUSDT-15m",
@@ -1064,9 +1066,9 @@
    "fee_mode": "maker",
    "oos_sharpe": 1.78,
    "score": 1.41,
-   "signal": 1.0,
-   "sig_last": "2026-11-11 00:50:00",
-   "sig_pct": 51.17
+   "signal": 0.0,
+   "sig_last": "2026-11-11 01:05:00",
+   "sig_pct": 51.32
   },
   {
    "key": "wick_vol-OPUSDT-15m",
@@ -1105,21 +1107,21 @@
   }
  ],
  "stats": {
-  "n_trades": 68,
-  "wins": 47,
-  "winrate": 69.1,
-  "equity": 1289.35,
-  "pnl_pct": 28.94,
-  "open": 2
+  "n_trades": 69,
+  "wins": 48,
+  "winrate": 69.6,
+  "equity": 1301.55,
+  "pnl_pct": 30.16,
+  "open": 1
  },
  "seen": {
-  "wick_vol-APTUSDT-15m": "2026-11-11 00:30:00",
-  "wick_vol-OPUSDT-15m": "2026-11-11 00:30:00",
-  "bollinger_reversion-DOTUSDT-15m": "2026-11-11 00:30:00",
-  "bb_vol-LTCUSDT-15m": "2026-11-11 00:30:00",
-  "spike_revert-SUIUSDT-15m": "2026-11-11 00:30:00",
-  "bb_regime-ARBUSDT-5m": "2026-11-11 00:50:00",
-  "streak_bb-SUIUSDT-5m": "2026-11-11 00:50:00"
+  "wick_vol-APTUSDT-15m": "2026-11-11 01:15:00",
+  "wick_vol-OPUSDT-15m": "2026-11-11 01:15:00",
+  "bollinger_reversion-DOTUSDT-15m": "2026-11-11 01:15:00",
+  "bb_vol-LTCUSDT-15m": "2026-11-11 01:15:00",
+  "spike_revert-SUIUSDT-15m": "2026-11-11 01:15:00",
+  "bb_regime-ARBUSDT-5m": "2026-11-11 01:25:00",
+  "streak_bb-SUIUSDT-5m": "2026-11-11 01:25:00"
  },
  "filter_stats": {
   "total": 1348,
