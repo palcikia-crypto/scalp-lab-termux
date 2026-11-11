@@ -969,8 +969,8 @@
    "reason": "flat signal"
   }
  ],
- "updated": "2026-11-11T00:55:34Z",
- "runs": 158,
+ "updated": "2026-11-11T00:57:18Z",
+ "runs": 159,
  "tops": [
   {
    "key": "wick_vol-APTUSDT-15m",
@@ -1092,10 +1092,10 @@
   "bb_regime-ARBUSDT-5m": "2026-11-11 00:50:00"
  },
  "filter_stats": {
-  "total": 1260,
-  "low_trades": 225,
+  "total": 1300,
+  "low_trades": 232,
   "low_folds": 0,
-  "low_pf": 943,
+  "low_pf": 976,
   "low_t": 86,
   "no_params": 0,
   "admitted": 6
