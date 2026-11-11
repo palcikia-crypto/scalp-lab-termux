@@ -1,7 +1,20 @@
 {
  "capital_start": 1000.0,
  "equity": 1289.353167119463,
- "positions": {},
+ "positions": {
+  "bb_regime-ARBUSDT-5m": {
+   "strategy": "bb_regime",
+   "symbol": "ARBUSDT",
+   "tf": "5m",
+   "signal": 1.0,
+   "entry": 0.1606,
+   "opened": "2026-11-11 00:40:00",
+   "fee_mode": "maker",
+   "oos_sharpe": 1.78,
+   "last_ts": "2026-11-11 00:40:00",
+   "last_px": 0.1606
+  }
+ },
  "closed": [
   {
    "key": "bollinger_reversion-SUIUSDT-15m",
@@ -956,8 +969,8 @@
    "reason": "flat signal"
   }
  ],
- "updated": "2026-11-11T00:44:11Z",
- "runs": 155,
+ "updated": "2026-11-11T00:48:42Z",
+ "runs": 156,
  "tops": [
   {
    "key": "wick_vol-APTUSDT-15m",
@@ -1010,6 +1023,23 @@
    "sig_pct": 13.99
   },
   {
+   "key": "bb_regime-ARBUSDT-5m",
+   "strategy": "bb_regime",
+   "symbol": "ARBUSDT",
+   "tf": "5m",
+   "params": {
+    "k": 2.0,
+    "n": 200,
+    "vz_max": 1.0
+   },
+   "fee_mode": "maker",
+   "oos_sharpe": 1.78,
+   "score": 1.41,
+   "signal": 1.0,
+   "sig_last": "2026-11-11 00:40:00",
+   "sig_pct": 51.07
+  },
+  {
    "key": "wick_vol-OPUSDT-15m",
    "strategy": "wick_vol",
    "symbol": "OPUSDT",
@@ -1051,23 +1081,24 @@
   "winrate": 69.1,
   "equity": 1289.35,
   "pnl_pct": 28.94,
-  "open": 0
+  "open": 1
  },
  "seen": {
-  "wick_vol-APTUSDT-15m": "2026-11-11 00:15:00",
-  "wick_vol-OPUSDT-15m": "2026-11-11 00:15:00",
-  "bollinger_reversion-DOTUSDT-15m": "2026-11-11 00:15:00",
-  "bb_vol-LTCUSDT-15m": "2026-11-11 00:15:00",
-  "spike_revert-SUIUSDT-15m": "2026-11-11 00:15:00"
+  "wick_vol-APTUSDT-15m": "2026-11-11 00:30:00",
+  "wick_vol-OPUSDT-15m": "2026-11-11 00:30:00",
+  "bollinger_reversion-DOTUSDT-15m": "2026-11-11 00:30:00",
+  "bb_vol-LTCUSDT-15m": "2026-11-11 00:30:00",
+  "spike_revert-SUIUSDT-15m": "2026-11-11 00:30:00",
+  "bb_regime-ARBUSDT-5m": "2026-11-11 00:40:00"
  },
  "filter_stats": {
-  "total": 1140,
+  "total": 1180,
   "low_trades": 225,
   "low_folds": 0,
-  "low_pf": 832,
-  "low_t": 78,
+  "low_pf": 865,
+  "low_t": 84,
   "no_params": 0,
-  "admitted": 5
+  "admitted": 6
  },
  "candidates": [
   {
