@@ -4,6 +4,7 @@
 - берет топ-стратегии из результатов бэктестов (прошедшие фильтры);
 - на свежих данных генерирует сигнал последнего закрытого бара;
 - открывает/закрывает виртуальные позиции, капитал $1000, сложный процент;
+- вычитает funding по открытым позициям (лонг платит при положительном);
 - пишет results/paper.json для панели.
 """
 import glob
@@ -12,6 +13,7 @@ import os
 import time
 
 import numpy as np
+import pandas as pd
 
 import config
 from bt import data, strategies
@@ -132,13 +134,16 @@ def top_strategies():
 def close_pos(st, key, px, ts, reason):
     pos = st["positions"].pop(key)
     d = pos["signal"]
-    pnl = d * (px / pos["entry"] - 1.0) - COST[pos["fee_mode"]]
+    # funding накопленный за время удержания (лонг платит при положительном)
+    fund = pos.get("fund", 0.0)
+    pnl = d * (px / pos["entry"] - 1.0) - COST[pos["fee_mode"]] - fund
     st["equity"] = st["equity"] * (1.0 + pnl)
     st["closed"].append({
         "key": key, "strategy": pos["strategy"], "symbol": pos["symbol"],
         "tf": pos["tf"], "side": "long" if d > 0 else "short",
         "entry": pos["entry"], "exit": px,
         "pnl_pct": round(pnl * 100, 4),
+        "fund_pct": round(fund * 100, 4),
         "opened": pos["opened"], "closed_ts": ts,
         "fee_mode": pos["fee_mode"], "reason": reason})
     st["closed"] = st["closed"][-300:]
@@ -188,6 +193,11 @@ def main():
         except Exception as e:
             print("paper skip", t["key"], str(e)[:80], flush=True)
             continue
+        tf_min = int(t["tf"][:-1])
+        fpb = None
+        if "funding" in df.columns:
+            fr = pd.to_numeric(df["funding"], errors="coerce").fillna(0.0).values
+            fpb = fr * (tf_min / 480.0)
         dts = df["dt"].astype(str).values
         closes = df["close"].values
         vals = np.asarray(sig.values, dtype=float)
@@ -208,6 +218,9 @@ def main():
             px = float(closes[i])
             ts = str(dts[i])
             pos = st["positions"].get(t["key"])
+            if pos is not None and fpb is not None:
+                # funding за бар удержания: лонг платит при положительном
+                pos["fund"] = pos.get("fund", 0.0) + pos["signal"] * fpb[i]
             if s != 0.0:
                 if pos is None or pos["signal"] != s:
                     if pos is not None:
@@ -217,7 +230,7 @@ def main():
                         "tf": t["tf"], "signal": s, "entry": px,
                         "opened": ts, "fee_mode": t["fee_mode"],
                         "oos_sharpe": t["oos_sharpe"], "last_ts": ts,
-                        "last_px": px}
+                        "last_px": px, "fund": 0.0}
                 else:
                     pos["last_ts"] = ts
                     pos["last_px"] = px
