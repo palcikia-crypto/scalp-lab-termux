@@ -1,19 +1,7 @@
 {
  "capital_start": 1000.0,
- "equity": 1338.7576364679408,
+ "equity": 1379.8104117427351,
  "positions": {
-  "spike_revert-SUIUSDT-15m": {
-   "strategy": "spike_revert",
-   "symbol": "SUIUSDT",
-   "tf": "15m",
-   "signal": -1.0,
-   "entry": 0.8439,
-   "opened": "2026-11-11 15:30:00",
-   "fee_mode": "maker",
-   "oos_sharpe": 2.34,
-   "last_ts": "2026-11-11 22:45:00",
-   "last_px": 0.8216
-  },
   "streak_bb-SUIUSDT-5m": {
    "strategy": "streak_bb",
    "symbol": "SUIUSDT",
@@ -23,8 +11,8 @@
    "opened": "2026-11-11 21:40:00",
    "fee_mode": "maker",
    "oos_sharpe": 2.16,
-   "last_ts": "2026-11-11 23:00:00",
-   "last_px": 0.8241
+   "last_ts": "2026-11-12 03:50:00",
+   "last_px": 0.8182
   },
   "bb_regime-ARBUSDT-5m": {
    "strategy": "bb_regime",
@@ -35,8 +23,32 @@
    "opened": "2026-11-11 21:40:00",
    "fee_mode": "maker",
    "oos_sharpe": 1.78,
-   "last_ts": "2026-11-11 23:00:00",
-   "last_px": 0.1543
+   "last_ts": "2026-11-12 03:50:00",
+   "last_px": 0.1499
+  },
+  "bollinger_reversion-DOTUSDT-15m": {
+   "strategy": "bollinger_reversion",
+   "symbol": "DOTUSDT",
+   "tf": "15m",
+   "signal": 1.0,
+   "entry": 0.83,
+   "opened": "2026-11-11 23:00:00",
+   "fee_mode": "maker",
+   "oos_sharpe": 1.73,
+   "last_ts": "2026-11-12 03:30:00",
+   "last_px": 0.844
+  },
+  "bb_vol-LTCUSDT-15m": {
+   "strategy": "bb_vol",
+   "symbol": "LTCUSDT",
+   "tf": "15m",
+   "signal": 1.0,
+   "entry": 49.68,
+   "opened": "2026-11-11 23:00:00",
+   "fee_mode": "maker",
+   "oos_sharpe": 1.72,
+   "last_ts": "2026-11-12 03:30:00",
+   "last_px": 50.0
   }
  },
  "closed": [
@@ -1061,10 +1073,24 @@
    "closed_ts": "2026-11-11 20:45:00",
    "fee_mode": "maker",
    "reason": "flat signal"
+  },
+  {
+   "key": "spike_revert-SUIUSDT-15m",
+   "strategy": "spike_revert",
+   "symbol": "SUIUSDT",
+   "tf": "15m",
+   "side": "short",
+   "entry": 0.8439,
+   "exit": 0.8176,
+   "pnl_pct": 3.0665,
+   "opened": "2026-11-11 15:30:00",
+   "closed_ts": "2026-11-11 23:15:00",
+   "fee_mode": "maker",
+   "reason": "flat signal"
   }
  ],
- "updated": "2026-11-11T23:08:57Z",
- "runs": 165,
+ "updated": "2026-11-12T03:56:50Z",
+ "runs": 166,
  "tops": [
   {
    "key": "wick_vol-APTUSDT-15m",
@@ -1097,8 +1123,8 @@
    "oos_sharpe": 2.16,
    "score": 2.16,
    "signal": 1.0,
-   "sig_last": "2026-11-11 23:00:00",
-   "sig_pct": 88.14
+   "sig_last": "2026-11-12 03:50:00",
+   "sig_pct": 86.65
   },
   {
    "key": "bollinger_reversion-DOTUSDT-15m",
@@ -1112,9 +1138,9 @@
    "fee_mode": "maker",
    "oos_sharpe": 1.73,
    "score": 1.73,
-   "signal": 0.0,
-   "sig_last": "2026-11-10 21:45:00",
-   "sig_pct": 30.06
+   "signal": 1.0,
+   "sig_last": "2026-11-12 03:30:00",
+   "sig_pct": 31.71
   },
   {
    "key": "spike_revert-SUIUSDT-15m",
@@ -1129,9 +1155,9 @@
    "fee_mode": "maker",
    "oos_sharpe": 2.34,
    "score": 1.52,
-   "signal": -1.0,
-   "sig_last": "2026-11-11 22:45:00",
-   "sig_pct": 16.59
+   "signal": 0.0,
+   "sig_last": "2026-11-11 23:00:00",
+   "sig_pct": 16.68
   },
   {
    "key": "bb_regime-ARBUSDT-5m",
@@ -1147,8 +1173,8 @@
    "oos_sharpe": 1.78,
    "score": 1.41,
    "signal": 1.0,
-   "sig_last": "2026-11-11 23:00:00",
-   "sig_pct": 52.21
+   "sig_last": "2026-11-12 03:50:00",
+   "sig_pct": 50.17
   },
   {
    "key": "wick_vol-OPUSDT-15m",
@@ -1181,27 +1207,27 @@
    "fee_mode": "maker",
    "oos_sharpe": 1.72,
    "score": 1.12,
-   "signal": 0.0,
-   "sig_last": "2026-11-10 23:00:00",
-   "sig_pct": 17.81
+   "signal": 1.0,
+   "sig_last": "2026-11-12 03:30:00",
+   "sig_pct": 19.46
   }
  ],
  "stats": {
-  "n_trades": 73,
-  "wins": 50,
-  "winrate": 68.5,
-  "equity": 1338.76,
-  "pnl_pct": 33.88,
-  "open": 3
+  "n_trades": 74,
+  "wins": 51,
+  "winrate": 68.9,
+  "equity": 1379.81,
+  "pnl_pct": 37.98,
+  "open": 4
  },
  "seen": {
-  "wick_vol-APTUSDT-15m": "2026-11-11 22:45:00",
-  "wick_vol-OPUSDT-15m": "2026-11-11 22:45:00",
-  "bollinger_reversion-DOTUSDT-15m": "2026-11-11 22:45:00",
-  "bb_vol-LTCUSDT-15m": "2026-11-11 22:45:00",
-  "spike_revert-SUIUSDT-15m": "2026-11-11 22:45:00",
-  "bb_regime-ARBUSDT-5m": "2026-11-11 23:00:00",
-  "streak_bb-SUIUSDT-5m": "2026-11-11 23:00:00"
+  "wick_vol-APTUSDT-15m": "2026-11-12 03:30:00",
+  "wick_vol-OPUSDT-15m": "2026-11-12 03:30:00",
+  "bollinger_reversion-DOTUSDT-15m": "2026-11-12 03:30:00",
+  "bb_vol-LTCUSDT-15m": "2026-11-12 03:30:00",
+  "spike_revert-SUIUSDT-15m": "2026-11-12 03:30:00",
+  "bb_regime-ARBUSDT-5m": "2026-11-12 03:50:00",
+  "streak_bb-SUIUSDT-5m": "2026-11-12 03:50:00"
  },
  "filter_stats": {
   "total": 1348,
