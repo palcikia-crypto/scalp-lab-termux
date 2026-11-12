@@ -1135,8 +1135,8 @@
    "reason": "flat signal"
   }
  ],
- "updated": "2026-11-12T11:43:55Z",
- "runs": 167,
+ "updated": "2026-11-12T11:44:56Z",
+ "runs": 168,
  "tops": [
   {
    "key": "wick_vol-APTUSDT-15m",
