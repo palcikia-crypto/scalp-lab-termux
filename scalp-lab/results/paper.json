@@ -1,44 +1,18 @@
 {
  "capital_start": 1000.0,
- "equity": 1289.3084262345762,
+ "equity": 1337.1417188910477,
  "positions": {
   "streak_bb-SUIUSDT-5m": {
    "strategy": "streak_bb",
    "symbol": "SUIUSDT",
    "tf": "5m",
    "signal": -1.0,
-   "entry": 0.7944,
-   "opened": "2026-11-12 15:50:00",
+   "entry": 0.8069,
+   "opened": "2026-11-12 21:25:00",
    "fee_mode": "maker",
    "oos_sharpe": 2.16,
-   "last_ts": "2026-11-12 20:50:00",
-   "last_px": 0.8056,
-   "fund": 0.0
-  },
-  "wick_vol-OPUSDT-15m": {
-   "strategy": "wick_vol",
-   "symbol": "OPUSDT",
-   "tf": "15m",
-   "signal": 1.0,
-   "entry": 0.0934,
-   "opened": "2026-11-12 13:00:00",
-   "fee_mode": "maker",
-   "oos_sharpe": 1.92,
-   "last_ts": "2026-11-12 20:30:00",
-   "last_px": 0.0959,
-   "fund": 0.0
-  },
-  "bb_vol-LTCUSDT-15m": {
-   "strategy": "bb_vol",
-   "symbol": "LTCUSDT",
-   "tf": "15m",
-   "signal": 1.0,
-   "entry": 48.85,
-   "opened": "2026-11-12 13:00:00",
-   "fee_mode": "maker",
-   "oos_sharpe": 1.72,
-   "last_ts": "2026-11-12 20:30:00",
-   "last_px": 50.12,
+   "last_ts": "2026-11-13 01:50:00",
+   "last_px": 0.8026,
    "fund": 0.0
   }
  },
@@ -1208,10 +1182,55 @@
    "closed_ts": "2026-11-12 18:10:00",
    "fee_mode": "maker",
    "reason": "flat signal"
+  },
+  {
+   "key": "streak_bb-SUIUSDT-5m",
+   "strategy": "streak_bb",
+   "symbol": "SUIUSDT",
+   "tf": "5m",
+   "side": "short",
+   "entry": 0.7944,
+   "exit": 0.803,
+   "pnl_pct": -1.1326,
+   "fund_pct": 0.0,
+   "opened": "2026-11-12 15:50:00",
+   "closed_ts": "2026-11-12 21:10:00",
+   "fee_mode": "maker",
+   "reason": "flat signal"
+  },
+  {
+   "key": "wick_vol-OPUSDT-15m",
+   "strategy": "wick_vol",
+   "symbol": "OPUSDT",
+   "tf": "15m",
+   "side": "long",
+   "entry": 0.0934,
+   "exit": 0.0957,
+   "pnl_pct": 2.4125,
+   "fund_pct": 0.0,
+   "opened": "2026-11-12 13:00:00",
+   "closed_ts": "2026-11-12 20:45:00",
+   "fee_mode": "maker",
+   "reason": "flat signal"
+  },
+  {
+   "key": "bb_vol-LTCUSDT-15m",
+   "strategy": "bb_vol",
+   "symbol": "LTCUSDT",
+   "tf": "15m",
+   "side": "long",
+   "entry": 48.85,
+   "exit": 50.06,
+   "pnl_pct": 2.427,
+   "fund_pct": 0.0,
+   "opened": "2026-11-12 13:00:00",
+   "closed_ts": "2026-11-12 20:45:00",
+   "fee_mode": "maker",
+   "reason": "flat signal"
   }
  ],
- "updated": "2026-11-12T20:58:17Z",
- "runs": 170,
+ "updated": "2026-11-13T01:58:44Z",
+ "runs": 171,
  "tops": [
   {
    "key": "wick_vol-APTUSDT-15m",
@@ -1244,8 +1263,8 @@
    "oos_sharpe": 2.16,
    "score": 2.16,
    "signal": -1.0,
-   "sig_last": "2026-11-12 20:50:00",
-   "sig_pct": 88.98
+   "sig_last": "2026-11-13 01:50:00",
+   "sig_pct": 87.94
   },
   {
    "key": "bollinger_reversion-DOTUSDT-15m",
@@ -1310,9 +1329,9 @@
    "fee_mode": "maker",
    "oos_sharpe": 1.92,
    "score": 1.24,
-   "signal": 1.0,
+   "signal": 0.0,
    "sig_last": "2026-11-12 20:30:00",
-   "sig_pct": 10.77
+   "sig_pct": 8.08
   },
   {
    "key": "bb_vol-LTCUSDT-15m",
@@ -1328,27 +1347,27 @@
    "fee_mode": "maker",
    "oos_sharpe": 1.72,
    "score": 1.12,
-   "signal": 1.0,
+   "signal": 0.0,
    "sig_last": "2026-11-12 20:30:00",
    "sig_pct": 20.85
   }
  ],
  "stats": {
-  "n_trades": 83,
-  "wins": 55,
+  "n_trades": 86,
+  "wins": 57,
   "winrate": 66.3,
-  "equity": 1289.31,
-  "pnl_pct": 28.93,
-  "open": 3
+  "equity": 1337.14,
+  "pnl_pct": 33.71,
+  "open": 1
  },
  "seen": {
-  "wick_vol-APTUSDT-15m": "2026-11-12 20:30:00",
-  "wick_vol-OPUSDT-15m": "2026-11-12 20:30:00",
-  "bollinger_reversion-DOTUSDT-15m": "2026-11-12 20:30:00",
-  "bb_vol-LTCUSDT-15m": "2026-11-12 20:30:00",
-  "spike_revert-SUIUSDT-15m": "2026-11-12 20:30:00",
-  "bb_regime-ARBUSDT-5m": "2026-11-12 20:50:00",
-  "streak_bb-SUIUSDT-5m": "2026-11-12 20:50:00"
+  "wick_vol-APTUSDT-15m": "2026-11-13 01:30:00",
+  "wick_vol-OPUSDT-15m": "2026-11-13 01:30:00",
+  "bollinger_reversion-DOTUSDT-15m": "2026-11-13 01:30:00",
+  "bb_vol-LTCUSDT-15m": "2026-11-13 01:30:00",
+  "spike_revert-SUIUSDT-15m": "2026-11-13 01:30:00",
+  "bb_regime-ARBUSDT-5m": "2026-11-13 01:50:00",
+  "streak_bb-SUIUSDT-5m": "2026-11-13 01:50:00"
  },
  "filter_stats": {
   "total": 1348,
