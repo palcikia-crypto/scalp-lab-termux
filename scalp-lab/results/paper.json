@@ -1,20 +1,7 @@
 {
  "capital_start": 1000.0,
- "equity": 1288.2269898943134,
+ "equity": 1297.7204671213078,
  "positions": {
-  "bb_maker-NEARUSDT-1m": {
-   "strategy": "bb_maker",
-   "symbol": "NEARUSDT",
-   "tf": "1m",
-   "signal": -1.0,
-   "entry": 3.352,
-   "opened": "2026-11-19 03:21:00",
-   "fee_mode": "maker",
-   "oos_sharpe": 3.01,
-   "last_ts": "2026-11-19 04:34:00",
-   "last_px": 3.409,
-   "fund": 0.0
-  },
   "streak_bb-SUIUSDT-5m": {
    "strategy": "streak_bb",
    "symbol": "SUIUSDT",
@@ -24,8 +11,8 @@
    "opened": "2026-11-19 03:25:00",
    "fee_mode": "maker",
    "oos_sharpe": 1.89,
-   "last_ts": "2026-11-19 04:30:00",
-   "last_px": 0.7256,
+   "last_ts": "2026-11-19 13:50:00",
+   "last_px": 0.7316,
    "fund": 0.0
   }
  },
@@ -2695,10 +2682,85 @@
    "closed_ts": "2026-11-19 03:25:00",
    "fee_mode": "maker",
    "reason": "signal flip"
+  },
+  {
+   "key": "bb_maker-NEARUSDT-1m",
+   "strategy": "bb_maker",
+   "symbol": "NEARUSDT",
+   "tf": "1m",
+   "side": "short",
+   "entry": 3.352,
+   "exit": 3.38,
+   "pnl_pct": -0.8853,
+   "fund_pct": 0.0,
+   "opened": "2026-11-19 03:21:00",
+   "closed_ts": "2026-11-19 05:37:00",
+   "fee_mode": "maker",
+   "reason": "signal flip"
+  },
+  {
+   "key": "bb_maker-NEARUSDT-1m",
+   "strategy": "bb_maker",
+   "symbol": "NEARUSDT",
+   "tf": "1m",
+   "side": "long",
+   "entry": 3.38,
+   "exit": 3.401,
+   "pnl_pct": 0.5713,
+   "fund_pct": 0.0,
+   "opened": "2026-11-19 05:37:00",
+   "closed_ts": "2026-11-19 06:05:00",
+   "fee_mode": "maker",
+   "reason": "flat signal"
+  },
+  {
+   "key": "bb_maker-NEARUSDT-1m",
+   "strategy": "bb_maker",
+   "symbol": "NEARUSDT",
+   "tf": "1m",
+   "side": "short",
+   "entry": 3.438,
+   "exit": 3.435,
+   "pnl_pct": 0.0373,
+   "fund_pct": 0.0,
+   "opened": "2026-11-19 07:58:00",
+   "closed_ts": "2026-11-19 09:14:00",
+   "fee_mode": "maker",
+   "reason": "flat signal"
+  },
+  {
+   "key": "bb_maker-NEARUSDT-1m",
+   "strategy": "bb_maker",
+   "symbol": "NEARUSDT",
+   "tf": "1m",
+   "side": "short",
+   "entry": 3.419,
+   "exit": 3.403,
+   "pnl_pct": 0.418,
+   "fund_pct": 0.0,
+   "opened": "2026-11-19 11:35:00",
+   "closed_ts": "2026-11-19 12:03:00",
+   "fee_mode": "maker",
+   "reason": "flat signal"
+  },
+  {
+   "key": "bb_maker-NEARUSDT-1m",
+   "strategy": "bb_maker",
+   "symbol": "NEARUSDT",
+   "tf": "1m",
+   "side": "long",
+   "entry": 3.378,
+   "exit": 3.4,
+   "pnl_pct": 0.6013,
+   "fund_pct": 0.0,
+   "opened": "2026-11-19 12:25:00",
+   "closed_ts": "2026-11-19 12:50:00",
+   "fee_mode": "maker",
+   "reason": "flat signal"
   }
  ],
- "updated": "2026-11-19T04:35:48Z",
- "runs": 194,
+ "updated": "2026-11-19T13:58:34Z",
+ "runs": 195,
  "tops": [
   {
    "key": "wick_vol-APTUSDT-15m",
@@ -2729,9 +2791,9 @@
    "fee_mode": "maker",
    "oos_sharpe": 3.01,
    "score": 2.49,
-   "signal": -1.0,
-   "sig_last": "2026-11-19 04:34:00",
-   "sig_pct": 43.24
+   "signal": 0.0,
+   "sig_last": "2026-11-19 12:49:00",
+   "sig_pct": 41.44
   },
   {
    "key": "spike_revert-SUIUSDT-15m",
@@ -2748,7 +2810,7 @@
    "score": 2.16,
    "signal": 0.0,
    "sig_last": "2026-11-15 04:30:00",
-   "sig_pct": 18.51
+   "sig_pct": 15.81
   },
   {
    "key": "streak_bb-SUIUSDT-5m",
@@ -2764,23 +2826,23 @@
    "oos_sharpe": 1.89,
    "score": 1.84,
    "signal": -1.0,
-   "sig_last": "2026-11-19 04:30:00",
-   "sig_pct": 94.64
+   "sig_last": "2026-11-19 13:50:00",
+   "sig_pct": 94.84
   }
  ],
  "stats": {
-  "n_trades": 183,
-  "wins": 111,
-  "winrate": 60.7,
-  "equity": 1288.23,
-  "pnl_pct": 28.82,
-  "open": 2
+  "n_trades": 188,
+  "wins": 115,
+  "winrate": 61.2,
+  "equity": 1297.72,
+  "pnl_pct": 29.77,
+  "open": 1
  },
  "seen": {
-  "wick_vol-APTUSDT-15m": "2026-11-19 04:15:00",
-  "spike_revert-SUIUSDT-15m": "2026-11-19 04:15:00",
-  "streak_bb-SUIUSDT-5m": "2026-11-19 04:30:00",
-  "bb_maker-NEARUSDT-1m": "2026-11-19 04:34:00"
+  "wick_vol-APTUSDT-15m": "2026-11-19 13:30:00",
+  "spike_revert-SUIUSDT-15m": "2026-11-19 13:30:00",
+  "streak_bb-SUIUSDT-5m": "2026-11-19 13:50:00",
+  "bb_maker-NEARUSDT-1m": "2026-11-19 13:57:00"
  },
  "filter_stats": {
   "total": 1348,
