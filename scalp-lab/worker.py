@@ -1,5 +1,6 @@
 import argparse
 import glob
+import hashlib
 import json
 import os
 import time
@@ -8,6 +9,9 @@ import config
 from runner import run_task
 
 MAX_ATTEMPTS = 3
+RESEARCH_TOP = 10
+RESEARCH_CAP = 24
+ERROR_RETRY_DAYS = 1
 
 
 def queue_files():
@@ -45,16 +49,29 @@ def load_queues():
         from queue_builder import build
         with open("results/queue.json", "w") as f:
             json.dump(build(), f, ensure_ascii=False)
+    today = time.strftime("%Y%m%d", time.gmtime())
     queues = []
     for p in queue_files():
         if not os.path.exists(p):
             continue
         with open(p) as f:
             q = json.load(f)
+        dirty = False
         for t in q:
             # tasks stuck in running (cancelled run) get retried
             if t.get("status") == "running":
                 t["status"] = "pending"
+                dirty = True
+            # errored tasks get one retry attempt per day:
+            # (fixed code deps / flaky data sources recover themselves)
+            if t.get("status") == "error" and t.get("retry_day") != today:
+                t["status"] = "pending"
+                t["retry_day"] = today
+                t["attempts"] = 0
+                dirty = True
+        if dirty:
+            with open(p, "w") as f:
+                json.dump(q, f, ensure_ascii=False)
         queues.append((p, q))
     return queues
 
@@ -237,6 +254,111 @@ def rotate_leaders(queues):
     return len(tasks)
 
 
+def research(queues):
+    """Исследовательская волна: когда все очереди пусты, строим соседние
+    варианты параметров вокруг топ-стратегий лидерборда (+25%/-25% по числовым
+    аргументам). Проверяем нечувствительность эджа к настройкам и продолжаем
+    поиск даже после того, как все базовые комбинации прогнаны."""
+    rows = []
+    try:
+        with open("reports/leaderboard.csv") as fh:
+            fh.readline()
+            for line in fh:
+                p = line.strip().split(",")
+                if len(p) >= 3:
+                    rows.append(p)
+    except Exception:
+        return 0
+    if not rows:
+        return 0
+    from bt.strategies import STRATEGIES
+    default_grids = {}
+    for name, (_, grid_list) in STRATEGIES.items():
+        try:
+            default_grids[name] = set(json.dumps(p, sort_keys=True) for p in grid_list)
+        except Exception:
+            default_grids[name] = set()
+    ids = set()
+    for _, q in queues:
+        for t in q:
+            ids.add(t["id"])
+    tasks = []
+    for row in rows[:RESEARCH_TOP]:
+        st_name, sym, tf = row[0], row[1], row[2]
+        try:
+            top = json.loads(row[-1]) if row[-1].strip().startswith("{") else None
+        except Exception:
+            top = None
+        if top is None:
+            r = None
+            for f in glob.glob("results/backtest/*%s-%s-%s.json" % (st_name, sym, tf)):
+                try:
+                    cand = json.load(open(f))
+                except Exception:
+                    continue
+                if isinstance(cand, dict) and cand.get("top_param"):
+                    try:
+                        tp = json.loads(cand["top_param"])
+                    except Exception:
+                        continue
+                    import os as _os
+                    if r is None or _os.path.getmtime(f) > (r[0] or 0):
+                        r = (_os.path.getmtime(f), tp)
+            top = r[1] if r else None
+        if not top:
+            continue
+        cfg = config.TFS.get(tf)
+        if cfg is None:
+            continue
+        seen_defaults = default_grids.get(st_name, set())
+        for q in param_neighbors(top):
+            key = json.dumps(q, sort_keys=True)
+            if key in seen_defaults:
+                continue
+            tag = hashlib.md5(key.encode()).hexdigest()[:8]
+            tid = "rs-" + st_name + "-" + sym + "-" + tf + "-" + tag
+            if tid in ids:
+                continue
+            ids.add(tid)
+            tasks.append({"id": tid, "kind": "backtest", "symbol": sym, "tf": tf,
+                          "strategy": st_name, "days": cfg["days"],
+                          "train_days": cfg["train_days"], "test_days": cfg["test_days"],
+                          "wave": "research", "param_grid": [q], "status": "pending"})
+            if len(tasks) >= RESEARCH_CAP:
+                break
+        if len(tasks) >= RESEARCH_CAP:
+            break
+    if not tasks:
+        return 0
+    n = len(queue_files())
+    path = "results/queue%d.json" % (n + 1)
+    with open(path, "w") as f:
+        json.dump(tasks, f, ensure_ascii=False)
+    print("research: %d param-neighbor tasks -> %s" % (len(tasks), path), flush=True)
+    return len(tasks)
+
+
+def param_neighbors(params):
+    """Соседние значения параметров: x0.75 и x1.33 числовых аргументов.
+    Целые округляются до целого, дроби - до 6 знаков."""
+    out = []
+    for k, v in params.items():
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            continue
+        for f in (0.75, 1.33):
+            nv = v * f
+            if isinstance(v, int):
+                nv = max(1, int(round(nv)))
+            else:
+                nv = round(nv, 6)
+            if nv == v:
+                continue
+            q = dict(params)
+            q[k] = nv
+            out.append(q)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--budget", type=float, default=40)
@@ -289,6 +411,7 @@ def main():
         evolve(queues)
         frontier(queues)
         rotate_leaders(queues)
+        research(queues)
     queues = load_queues()
     all_tasks = [x for _, qq in queues for x in qq]
     save_progress(all_tasks, start, "final")

@@ -49,7 +49,12 @@ def position_returns(df, pos, fee, slip, fpb=None, maker=None):
 
 
 def walk_forward(df, sigs, train_bars, test_bars, fee, slip, tf_min,
-                 fee2=None, slip2=None):
+                 fee2=None, slip2=None, exec_mode=None):
+    """exec_mode = "maker": стратегия входит лимитками. Главный поток OOS получает
+    реалистичную модель исполнения: лимитка заполнилась (цена коснулась уровня) ->
+    maker-комиссия, не заполнилась -> taker (fee + slip). oos_maker возвращает
+    верхнюю границу (все лимитки исполнились, чистый maker). Без exec_mode
+    поведение прежнее: oos по (fee, slip), oos_maker - экспериментальный поток."""
     bars_per_year = 365.0 * 24 * 60 / tf_min
     keys = list(sigs.keys())
     if not keys:
@@ -65,16 +70,28 @@ def walk_forward(df, sigs, train_bars, test_bars, fee, slip, tf_min,
         best_key, best_is = None, -1e9
         for k in keys:
             a, b = t0 - train_bars, t0
-            net, _ = position_returns(df.iloc[a:b], sigs[k].iloc[a:b], fee, slip, fpb=fpb)
+            net, _ = position_returns(df.iloc[a:b], sigs[k].iloc[a:b], fee, slip,
+                                      fpb=None if fpb is None else fpb[a:b])
             m = metrics(net, bars_per_year)
             if m["sharpe"] > best_is:
                 best_is, best_key = m["sharpe"], k
         a, b = t0, t0 + test_bars
-        net, trades = position_returns(df.iloc[a:b], sigs[best_key].iloc[a:b], fee, slip, fpb=fpb)
-        oos_parts.append(net)
-        if fee2 is not None:
+        seg_fpb = None if fpb is None else fpb[a:b]
+        if exec_mode == "maker" and fee2 is not None:
+            net, trades = position_returns(df.iloc[a:b], sigs[best_key].iloc[a:b],
+                                           fee, slip, fpb=seg_fpb, maker=(fee2, slip2))
             net2, _ = position_returns(df.iloc[a:b], sigs[best_key].iloc[a:b],
-                                       fee, slip, fpb=fpb, maker=(fee2, slip2))
+                                       fee2, slip2, fpb=seg_fpb, maker=(fee2, slip2))
+        else:
+            net, trades = position_returns(df.iloc[a:b], sigs[best_key].iloc[a:b],
+                                           fee, slip, fpb=seg_fpb)
+            if fee2 is not None:
+                net2, _ = position_returns(df.iloc[a:b], sigs[best_key].iloc[a:b],
+                                           fee, slip, fpb=seg_fpb, maker=(fee2, slip2))
+            else:
+                net2 = None
+        oos_parts.append(net)
+        if net2 is not None:
             oos2_parts.append(net2)
         chosen.append(best_key)
         is_sharpes.append(best_is)
