@@ -33,6 +33,19 @@ MIN_PF = 1.01    # минимальный profit factor после издерж�
 STAB_REF = 0.35  # эталон стабильности параметров (ниже - штраф к скору)
 LOOKBACK_DAYS = {"1m": 2, "5m": 7, "15m": 12, "1h": 40}
 PAPER_BUDGET_S = 120
+
+# Адаптивный риск: доля позиции = глобальный множитель (просадка портфеля)
+# x локальный множитель (серия убытков конкретной стратегии).
+RISK = {
+    "dd_soft": 0.85,   # капитал < 85% пика -> 2x снижение ставки
+    "dd_hard": 0.70,   # капитал < 70% пика -> 4x снижение ставки
+    "recover": 0.95,   # возврат к полной ставке только выше 95% пика (гистерезис)
+    "mult_soft": 0.5,
+    "mult_hard": 0.25,
+    "loss3": 0.5,      # 3 подряд убытка стратегии -> половина ставки
+    "loss5": 0.25,     # 5 подряд -> четверть ставки
+    "win_reset": 3,    # 3 подряд прибыли -> ставка восстановлена
+}
 COST = {"taker": 2 * (config.FEE + config.SLIP),
         "maker": 2 * (config.FEE_MAKER + config.SLIP_MAKER)}
 
@@ -131,19 +144,64 @@ def top_strategies():
     return out, stats, cand[:12]
 
 
+def global_mult(st):
+    """Множитель ставки по просадке портфеля, с гистерезисом возврата."""
+    eq = float(st.get("equity", CAPITAL_START))
+    r = st.setdefault("risk", {"peak": eq, "mult": 1.0})
+    r["peak"] = max(float(r.get("peak", eq)), eq)
+    dd = eq / r["peak"] if r["peak"] > 0 else 1.0
+    prev = float(r.get("mult", 1.0))
+    if dd < RISK["dd_hard"]:
+        m = RISK["mult_hard"]
+    elif dd < RISK["dd_soft"]:
+        m = RISK["mult_soft"]
+    elif dd >= RISK["recover"]:
+        m = 1.0
+    else:
+        m = prev
+    r["mult"] = m
+    r["dd"] = round(dd, 4)
+    return m
+
+
+def record_result(st, key, pnl_pct):
+    """Обновляет серию убытков/прибылей стратегии и её локальный множитель ставки."""
+    e = st.setdefault("perf", {}).setdefault(
+        key, {"losses": 0, "wins": 0, "mult": 1.0})
+    if pnl_pct < 0:
+        e["losses"] = int(e.get("losses", 0)) + 1
+        e["wins"] = 0
+        if e["losses"] >= 5:
+            e["mult"] = RISK["loss5"]
+        elif e["losses"] >= 3:
+            e["mult"] = RISK["loss3"]
+    elif pnl_pct > 0:
+        e["wins"] = int(e.get("wins", 0)) + 1
+        e["losses"] = 0
+        if e["wins"] >= RISK["win_reset"]:
+            e["mult"] = 1.0
+
+
+def key_mult(st, key):
+    return float(st.get("perf", {}).get(key, {}).get("mult", 1.0))
+
+
 def close_pos(st, key, px, ts, reason):
     pos = st["positions"].pop(key)
     d = pos["signal"]
     # funding накопленный за время удержания (лонг платит при положительном)
     fund = pos.get("fund", 0.0)
-    pnl = d * (px / pos["entry"] - 1.0) - COST[pos["fee_mode"]] - fund
+    size = float(pos.get("size", 1.0))
+    pnl = (d * (px / pos["entry"] - 1.0) - COST[pos["fee_mode"]] - fund) * size
     st["equity"] = st["equity"] * (1.0 + pnl)
+    record_result(st, key, pnl * 100.0)
     st["closed"].append({
         "key": key, "strategy": pos["strategy"], "symbol": pos["symbol"],
         "tf": pos["tf"], "side": "long" if d > 0 else "short",
         "entry": pos["entry"], "exit": px,
         "pnl_pct": round(pnl * 100, 4),
         "fund_pct": round(fund * 100, 4),
+        "size": round(size, 2),
         "opened": pos["opened"], "closed_ts": ts,
         "fee_mode": pos["fee_mode"], "reason": reason})
     st["closed"] = st["closed"][-300:]
@@ -162,6 +220,7 @@ def get_klines(symbol, tf):
 def main():
     st = load_state()
     tops, fstats, cands = top_strategies()
+    gmult = global_mult(st)
     top_keys = set(t["key"] for t in tops)
     # закрыть позиции стратегий, выпавших из топа
     for key in list(st["positions"].keys()):
@@ -225,12 +284,13 @@ def main():
                 if pos is None or pos["signal"] != s:
                     if pos is not None:
                         close_pos(st, t["key"], px, ts, "signal flip")
+                    size = round(gmult * key_mult(st, t["key"]), 4)
                     st["positions"][t["key"]] = {
                         "strategy": t["strategy"], "symbol": t["symbol"],
                         "tf": t["tf"], "signal": s, "entry": px,
                         "opened": ts, "fee_mode": t["fee_mode"],
                         "oos_sharpe": t["oos_sharpe"], "last_ts": ts,
-                        "last_px": px, "fund": 0.0}
+                        "last_px": px, "fund": 0.0, "size": size}
                 else:
                     pos["last_ts"] = ts
                     pos["last_px"] = px
@@ -242,13 +302,18 @@ def main():
     st["tops"] = tops
     trades = st["closed"]
     wins = sum(1 for x in trades if x["pnl_pct"] > 0)
+    gmult = global_mult(st)
     st["stats"] = {
         "n_trades": len(trades),
         "wins": wins,
         "winrate": round(100.0 * wins / len(trades), 1) if trades else 0.0,
         "equity": round(st["equity"], 2),
         "pnl_pct": round((st["equity"] / st["capital_start"] - 1.0) * 100, 2),
-        "open": len(st["positions"])}
+        "open": len(st["positions"]),
+        "risk_mult": gmult}
+    reduced = {k: v["mult"] for k, v in st.get("perf", {}).items() if v.get("mult", 1.0) < 1.0}
+    if reduced:
+        st["reduced_sizing"] = reduced
     st["filter_stats"] = fstats
     st["candidates"] = cands
     save_state(st)
