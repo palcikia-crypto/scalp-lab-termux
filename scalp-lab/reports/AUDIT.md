@@ -36,3 +36,8 @@ perturbation-тесты на заглядывание в будущее, све�
 - Фандинг-задачи: краш не воспроизводится, `funding_cost=true` в свежих прогонах.
 - `progress.json`: done 4412 / errors 0.
 - Старые `fr-*-1h` — «not enough bars» (недостаточно истории 1h для walk-forward, не баг).
+
+## Деплой панели
+- Лидерборд/отчёт регенерированы и закоммичены 2026-11-20 (results 4412/4412).
+- Два подряд деплоя pages упали на transient-ошибке GitHub (`deploy-pages`:
+  «Fetching artifact metadata failed» при успешно загруженном артефакте, 425 KB).
