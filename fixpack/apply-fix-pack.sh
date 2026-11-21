@@ -19,7 +19,12 @@ apply() {
         git clone --quiet "https://github.com/palcikia-crypto/$repo.git" "$dir" || { echo "clone failed"; return 1; }
         git -C "$dir" checkout main -q
     fi
-    curl -sL "$url" -o "$local_patch" || { echo "patch download failed"; return 1; }
+    curl -sL "$url" -o "$local_patch" || true
+    if [ ! -s "$local_patch" ] || head -c 20 "$local_patch" | grep -q '^404'; then
+        gh api -H "Accept: application/vnd.github.raw+json" \
+            "repos/palcikia-crypto/scalp-lab-termux/contents/fixpack/$repo/$patch?ref=fixpack-other-repos" \
+            > "$local_patch" || { echo "patch download failed (curl + gh)"; return 1; }
+    fi
     [ -s "$local_patch" ] || { echo "patch empty"; return 1; }
     if git -C "$dir" am -3 "$local_patch" >/tmp/am-$repo.log 2>&1; then
         echo "patch applied"
