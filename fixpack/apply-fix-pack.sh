@@ -49,5 +49,10 @@ apply "polymarket-lab" "0001-fix-repair-2000-char-corruption-in-14-files-settle_
 apply "scalp-lab-pro-" "0001-fix-repair-2000-char-corruption-in-6-files-pm_worker.patch"
 apply "pseudo-opt-bot" "0001-risk-adaptive-drawdown-ladder-stake-x0.5-x0.25-x0.1-.patch"
 
+if command -v gh >/dev/null 2>&1; then
+    echo "— перезапускаю застрявший воркер pseudo-opt-bot"
+    gh workflow run paper.yml -R palcikia-crypto/pseudo-opt-bot 2>/dev/null && echo "paper.yml запущен" || echo "не удалось запустить через gh (не критично — запустится по расписанию)"
+fi
+
 echo
 echo "Готово. Воркеры подхватят изменения в ближайший запуск по расписанию."

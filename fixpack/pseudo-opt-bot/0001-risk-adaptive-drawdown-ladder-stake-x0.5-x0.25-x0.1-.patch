@@ -1,20 +1,20 @@
-From d368bf132f2452bfc69ab8e8f4764f0eb3a3e644 Mon Sep 17 00:00:00 2001
+From 1254dcbc195b41796313bb71a48f13edad4ade46 Mon Sep 17 00:00:00 2001
 From: Vibe Nuage Agent <vibe@mistral.ai>
 Date: Sat, 21 Nov 2026 04:36:45 +0000
 Subject: [PATCH] risk: adaptive drawdown ladder (stake x0.5/x0.25/x0.1 at
  10/20/30% DD) + DAY_LOSS_PCT=10 enabled; equity_peak backfilled from trades
 
 ---
- .github/workflows/paper.yml |  7 +++++++
+ .github/workflows/paper.yml | 16 ++++++++++++++++
  config.py                   |  9 ++++++++-
  paper.py                    | 26 +++++++++++++++++++++++++-
- 3 files changed, 40 insertions(+), 2 deletions(-)
+ 3 files changed, 49 insertions(+), 2 deletions(-)
 
 diff --git a/.github/workflows/paper.yml b/.github/workflows/paper.yml
-index 5168cdb..20ecec9 100644
+index 5168cdb..ea7ab19 100644
 --- a/.github/workflows/paper.yml
 +++ b/.github/workflows/paper.yml
-@@ -38,6 +38,13 @@ jobs:
+@@ -38,12 +38,28 @@ jobs:
            PAPER_MAX_RUNTIME: '330'
            PAPER_POLL_SEC: '4'
            PAPER_STATE_FILE: 'paper_state.json'
@@ -28,6 +28,21 @@ index 5168cdb..20ecec9 100644
          run: python paper.py
  
        - name: Commit state
+         run: |
+           git config user.name "paper-bot"
+           git config user.email "actions@users.noreply.github.com"
++          git fetch origin main
++          git stash push -m paper_state -- paper_state.json >/dev/null 2>&1 || true
++          if ! git rebase origin/main; then
++            git rebase --abort
++            git stash pop >/dev/null 2>&1 || true
++            echo "rebase failed, state commit skipped"
++            exit 0
++          fi
++          git stash pop >/dev/null 2>&1 || true
+           git add paper_state.json || true
+           if git diff --cached --quiet; then
+             echo "state unchanged"
 diff --git a/config.py b/config.py
 index 5fb3e9f..a81dc8e 100644
 --- a/config.py
