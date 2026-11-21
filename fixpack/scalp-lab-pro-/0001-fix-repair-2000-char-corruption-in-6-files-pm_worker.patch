@@ -1,0 +1,805 @@
+From 18736c44b410a2daa1f4595547135213cccce6d7 Mon Sep 17 00:00:00 2001
+From: Vibe Nuage Agent <vibe@mistral.ai>
+Date: Sat, 21 Nov 2026 03:05:58 +0000
+Subject: [PATCH] fix: repair 2000-char corruption in 6 files; pm_worker
+ settle_sht() no more fake wins; honest state (5 fakes = real losses); repair
+ queue/universe JSON
+
+---
+ engines/pm_worker.py              |  18 +-
+ engines/scalp/bt/data.py          |  12 +-
+ engines/scalp/bt/engine.py        |   3 +-
+ engines/scalp/bt/strategies.py    |  24 +--
+ engines/scalp/reporter.py         |   9 +-
+ engines/scalp/results/queue2.json |   5 +-
+ engines/scalp/results/queue5.json |   6 +-
+ engines/scalp/worker.py           |  15 +-
+ reporter.py                       |   6 +-
+ results/state.json                |  65 +++---
+ results/universe.json             | 316 +-----------------------------
+ 11 files changed, 72 insertions(+), 407 deletions(-)
+
+diff --git a/engines/pm_worker.py b/engines/pm_worker.py
+index ad88152..d0e735d 100644
+--- a/engines/pm_worker.py
++++ b/engines/pm_worker.py
+@@ -299,9 +299,9 @@ def settle_sht(st):
+         if not pos or pos.get("kind") != "sht": continue
+         if time.time() < pos["end_ts"] + 120: continue
+         final = None
+-        if time.time() > pos["end_ts"] + 7200:
+-            final = 0.5
+-            reason = "нет данных расчёта"
++        if time.time() > pos["end_ts"] + 7 * 86400:
++            final = pos["entry"]
++            reason = "нет данных расчёта — возврат по входу"
+         else:
+             pr = None
+             try:
+@@ -327,17 +327,19 @@ def settle_sht(st):
+         if final is None: continue
+         st["positions"].pop(key)
+         payout = pos["shares"] * final
+-        win = final >= 0.5
++        breakeven = abs(final - pos["entry"]) < 1e-9
++        win = (final >= 0.5) and not breakeven
+         st["cash"] += payout * (1 - FEE / 2)
+         ret = payout / pos["usd"] - 1.0
+         st["closed"].append({"question": pos["question"], "slug": pos["slug"],
+-            "outcome": pos["outcome"], "entry": pos["entry"], "exit": 1.0 if win else 0.0,
+-            "ret_pct": round(ret * 100, 2), "strategy": pos["strategy"],
++            "outcome": pos["outcome"], "entry": pos["entry"], "exit": round(final, 4),
++            "ret_pct": round(ret * 100, 2), "strategy": pos["strategy"], "usd": pos["usd"], "shares": pos["shares"],
+             "opened": pos["opened"], "closed": now(),
+-            "reason": reason + (", выигрыш" if win else ", проигрыш")})
++            "reason": reason + (", выигрыш" if win else ("" if breakeven else ", проигрыш"))})
+         st["closed"] = st["closed"][-300:]
+         p_model = pos["fair_up"] if pos["outcome"] == "Up" else round(1.0 - pos["fair_up"], 4)
+-        st.setdefault("cal", []).append({"p": p_model, "win": 1 if win else 0, "tag": pos["strategy"]})
++        if not breakeven:
++            st.setdefault("cal", []).append({"p": p_model, "win": 1 if win else 0, "tag": pos["strategy"]})
+         st["cal"] = st["cal"][-500:]
+         st["stats"] = st.get("stats") or {}
+         st["stats"]["sht_trades"] = int(st["stats"].get("sht_trades", 0)) + 1
+diff --git a/engines/scalp/bt/data.py b/engines/scalp/bt/data.py
+index a338c82..768e661 100644
+--- a/engines/scalp/bt/data.py
++++ b/engines/scalp/bt/data.py
+@@ -58,8 +58,7 @@ def _klines_raw(symbol, tf, days, cache_dir):
+         url = BASE + "/daily/klines/" + symbol + "/" + tf + "/" + fn
+         if not os.path.exists(p):
+             if not _fetch(url, p):
+-       
+-         continue
++                continue
+         frames.append(_read_zip(p))
+     if not frames:
+         raise RuntimeError("no data for " + symbol + " " + tf)
+@@ -114,8 +113,7 @@ def _read_zip_named(path, cols):
+ 
+ 
+ def _deriv_raw(kind, symbol, days, cache_dir, timeout=20, max_req=40):
+-    
+-"""fundingRate / metrics: monthly + daily архивы data.binance.vision (futures um).
++    """fundingRate / metrics: monthly + daily архивы data.binance.vision (futures um).
+     Жёсткие таймауты и лимит запросов: медленный/битый источник не может
+     повесить воркер или бумажную торговлю."""
+     cols = FUND_COLS if kind == "fundingRate" else METRICS_COLS
+@@ -164,8 +162,7 @@ def funding(symbol, days, cache_dir=".cache", timeout=20):
+     except RuntimeError:
+         if not symbol.endswith("USDT") or symbol.startswith("1000"):
+             raise
+-        raw = _deriv_raw
+-("fundingRate", "1000" + symbol, days, cache_dir, timeout)
++        raw = _deriv_raw("fundingRate", "1000" + symbol, days, cache_dir, timeout)
+     fr = pd.DataFrame({
+         "dt": pd.to_datetime(raw["calc_time"].astype("int64"), unit="ms", utc=True),
+         "funding": pd.to_numeric(raw["last_funding_rate"], errors="coerce")})
+@@ -211,8 +208,7 @@ def add_deriv(df, symbol, days, cache_dir=".cache", timeout=20):
+         for c in side.columns:
+             if c == "dt":
+                 continue
+-     
+-       v = side[c].values
++            v = side[c].values
+             df[c] = np.where(pos >= 0, v[np.clip(pos, 0, len(v) - 1)], 0.0)
+     for c in ("funding", "oi", "ls_ratio"):
+         if c not in df.columns:
+diff --git a/engines/scalp/bt/engine.py b/engines/scalp/bt/engine.py
+index 8952774..43d495e 100644
+--- a/engines/scalp/bt/engine.py
++++ b/engines/scalp/bt/engine.py
+@@ -58,8 +58,7 @@ def walk_forward(df, sigs, train_bars, test_bars, fee, slip, tf_min,
+         "param_stability": float(top[1] / len(chosen)),
+         "top_param": top[0],
+     }
+-    if oos
+-2_parts:
++    if oos2_parts:
+         mo2 = metrics(np.concatenate(oos2_parts), bars_per_year)
+         res["oos_maker"] = mo2
+     return res
+diff --git a/engines/scalp/bt/strategies.py b/engines/scalp/bt/strategies.py
+index e87137a..ab81588 100644
+--- a/engines/scalp/bt/strategies.py
++++ b/engines/scalp/bt/strategies.py
+@@ -65,8 +65,7 @@ def streak_reversion(df, n_streak, h):
+     sig = pd.Series(np.nan, index=df.index)
+     sig[dn_run >= n_streak] = 1.0
+     sig[up_run >= n_streak] = -1.0
+-    return sig.ffill(limit=h).
+-fillna(0.0)
++    return sig.ffill(limit=h).fillna(0.0)
+ 
+ 
+ def vol_drift(df, z, h):
+@@ -129,8 +128,7 @@ def streak_vol(df, n_streak, vz, h):
+     dn_run = dn.groupby((~dn).cumsum()).cumsum()
+     z = _vol_z(df)
+     sig = pd.Series(np.nan, index=df.index)
+-    sig[(dn_run >= n_streak) 
+-& (z > vz)] = 1.0
++    sig[(dn_run >= n_streak) & (z > vz)] = 1.0
+     sig[(up_run >= n_streak) & (z > vz)] = -1.0
+     return sig.ffill(limit=h).fillna(0.0)
+ 
+@@ -188,8 +186,7 @@ def crash_revert(df, k, thr, vz, h):
+     z = _vol_z(df)
+     sig = pd.Series(np.nan, index=df.index)
+     sig[(cum < -thr) & (z > vz)] = 1.0
+-    sig[(cum > thr) & (z >
+- vz)] = -1.0
++    sig[(cum > thr) & (z > vz)] = -1.0
+     return sig.ffill(limit=h).fillna(0.0)
+ 
+ 
+@@ -247,8 +244,7 @@ def ls_contrarian(df, z, h):
+     return sig.ffill(limit=h).fillna(0.0)
+ 
+ 
+-# ===== мета-стратегии: сигна
+-л + фильтр режима рынка =====
++# ===== мета-стратегии: сигнал + фильтр режима рынка =====
+ 
+ 
+ def bb_regime(df, n, k, vz_max):
+@@ -309,8 +305,7 @@ def flow_fade(df, k, h):
+     sig = pd.Series(np.nan, index=df.index)
+     sig[z > k] = -1.0
+     sig[z < -k] = 1.0
+-    return sig.ffill(limit=h).fillna(0.0
+-)
++    return sig.ffill(limit=h).fillna(0.0)
+ 
+ 
+ def squeeze_pop(df, n, m, vz, h):
+@@ -360,8 +355,7 @@ def streak_bb(df, n_streak, k, h):
+     sd = df["close"].rolling(20).std()
+     sig = pd.Series(np.nan, index=df.index)
+     sig[(dn_run >= n_streak) & (df["close"] < m - k * sd)] = 1.0
+-    sig[(up_run >= n_streak) & (df["close"] > m + k * sd)] = -
+-1.0
++    sig[(up_run >= n_streak) & (df["close"] > m + k * sd)] = -1.0
+     return sig.ffill(limit=h).fillna(0.0)
+ 
+ 
+@@ -408,8 +402,7 @@ STRATEGIES = {
+     # памп/дамп: резкий ход с объёмом
+     "spike_revert": (spike_revert, grid(pct=[0.01, 0.02, 0.03, 0.05], vz=[2.0, 3.0], h=[30, 60])),
+     "spike_follow": (spike_follow, grid(pct=[0.008, 0.015, 0.03], vz=[2.0, 3.0], h=[15, 30, 60])),
+-    # памп/дамп: волна 2 — каскады, с
+-пайк+канал, взрыв объёма
++    # памп/дамп: волна 2 — каскады, спайк+канал, взрыв объёма
+     "crash_revert": (crash_revert, grid(k=[3, 5], thr=[0.03, 0.05, 0.08], vz=[2.0, 3.0], h=[30, 60])),
+     "spike_bb": (spike_bb, grid(pct=[0.01, 0.02], k=[2.0, 2.5], vz=[2.0, 3.0], h=[30, 60])),
+     "vol_burst_revert": (vol_burst_revert, grid(vz=[4.0, 5.0, 6.0], h=[60, 120])),
+@@ -439,5 +432,4 @@ MAKER_SET = {"streak_reversion", "wick_reversion", "bb_maker",
+              "bb_fast", "ema_snap", "flow_fade", "qr_revert", "level_fade", "streak_bb"}
+ 
+ # стратегии, которым нужны funding/OI/long-short из архивов (runner обогащает df)
+-DERIV_SET = {"funding_revert", "oi_e
+-xhaust", "ls_contrarian"}
++DERIV_SET = {"funding_revert", "oi_exhaust", "ls_contrarian"}
+diff --git a/engines/scalp/reporter.py b/engines/scalp/reporter.py
+index a965205..b8716e8 100644
+--- a/engines/scalp/reporter.py
++++ b/engines/scalp/reporter.py
+@@ -81,8 +81,7 @@ def main():
+     # ротация: для пары (стратегия, пара, TF) остаётся самый свежий прогон
+     bts = [v[1] for v in best.values()]
+     scans = []
+-    for f in 
+-glob.glob("results/scan/*.json"):
++    for f in glob.glob("results/scan/*.json"):
+         try:
+             r = json.load(open(f))
+         except Exception:
+@@ -127,8 +126,7 @@ glob.glob("results/scan/*.json"):
+         robust = "*" if (r["param_stability"] >= 0.5 and o["t"] > 2.0) else ""
+         lines.append("| %d | %s%s | %s | %s | %.2f | %.2f | %.1f | %d | %.1f | %+.3f%% | %+.2f%% | $%+.0f | %.0f%% | %s |" % (
+             i + 1, r["strategy"], robust, r["symbol"], r["tf"], o["sharpe"], o["pf"],
+-      
+-      o["t"], r["trades"], tpd, d * 100, m * 100, m * 1000,
++            o["t"], r["trades"], tpd, d * 100, m * 100, m * 1000,
+             r["param_stability"] * 100, fee_mode(r)))
+     lines.append("")
+     lines.append("Робастные отмечены звездочкой: стабильные параметры между фолдами + t>2.")
+@@ -167,8 +165,7 @@ glob.glob("results/scan/*.json"):
+             for (ev, hz), xs in sorted(groups2.items(), key=lambda kv: -abs(np.mean([a["mean_fwd"] for a in kv[1]]))):
+                 mf = np.mean([a["mean_fwd"] for a in xs])
+                 mt = np.median([a["t"] for a in xs])
+-                lines.append("| %s | %d | %d | %s | %.1f |" % (ev, hz, len(x
+-s), fmt(mf), mt))
++                lines.append("| %s | %d | %d | %s | %.1f |" % (ev, hz, len(xs), fmt(mf), mt))
+         else:
+             lines.append("Пока ни один паттерн не прошел статзначимую проверку (это нормальный результат - зато без подгонок).")
+         lines.append("")
+diff --git a/engines/scalp/results/queue2.json b/engines/scalp/results/queue2.json
+index e2fb908..34491fd 100644
+--- a/engines/scalp/results/queue2.json
++++ b/engines/scalp/results/queue2.json
+@@ -1,4 +1 @@
+-[{"id": "ev-bb_maker-NEARUSDT-1m-v2", "kind": "backtest", "symbol": "NEARUSDT", "tf": "1m", "strategy": "bb_maker", "days": 360, "train_days": 40, "test_days": 10, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_maker-NEARUSDT-1m-v2.json"}, {"id": "ev-bb_maker-NEARUSDT-1m-v4", "kind": "backtest", "symbol": "NEARUSDT", "tf": "1m", "strategy": "bb_maker", "days": 720, "train_days": 80, "test_days": 20, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_maker-NEARUSDT-1m-v4.json"}, {"id": "ev-wick_vol-APTUSDT-15m-v2", "kind": "backtest", "symbol": "APTUSDT", "tf": "15m", "strategy": "wick_vol", "days": 730, "train_days": 90, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-wick_vol-APTUSDT-15m-v2.json"}, {"id": "ev-wick_vol-APTUSDT-15m-v4", "kind": "backtest", "symbol": "APTUSDT", "tf": "15m", "strategy": "wick_vol", "days": 1460, "train_days": 180, "test_days": 56, "wave": "deep", "status": "done", "result": "results/backtest/ev-wick_vol-APTUSDT-15m-v4.json"}, {"id": "ev-bb_regime-NEARUSDT-1m-v2", "kind": "backtest", "symbol": "NEARUSDT", "tf": "1m", "strategy": "bb_regime", "days": 360, "train_days": 40, "test_days": 10, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_regime-NEARUSDT-1m-v2.json"}, {"id": "ev-bb_regime-NEARUSDT-1m-v4", "kind": "backtest", "symbol": "NEARUSDT", "tf": "1m", "strategy": "bb_regime", "days": 720, "train_days": 80, "test_days": 20, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_regime-NEARUSDT-1m-v4.json"}, {"id": "ev-vol_burst_revert-ARBUSDT-5m-v2", "kind": "backtest", "symbol": "ARBUSDT", "tf": "5m", "strategy": "vol_burst_revert", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-vol_burst_revert-ARBUSDT-5m-v2.json"}, {"id": "ev-vol_burst_revert-ARBUSDT-5m-v4", "kind": "backtest", "symbol": "ARBUSDT", "tf": "5m", "strategy": "vol_burst_revert", "days": 1460, "train_
+-days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-vol_burst_revert-ARBUSDT-5m-v4.json"}, {"id": "ev-funding_revert-SUIUSDT-1m-v2", "kind": "backtest", "symbol": "SUIUSDT", "tf": "1m", "strategy": "funding_revert", "days": 360, "train_days": 40, "test_days": 10, "wave": "deep", "status": "done", "result": "results/backtest/ev-funding_revert-SUIUSDT-1m-v2.json"}, {"id": "ev-funding_revert-SUIUSDT-1m-v4", "kind": "backtest", "symbol": "SUIUSDT", "tf": "1m", "strategy": "funding_revert", "days": 720, "train_days": 80, "test_days": 20, "wave": "deep", "status": "done", "result": "results/backtest/ev-funding_revert-SUIUSDT-1m-v4.json"}, {"id": "ev-streak_bb-LTCUSDT-5m-v2", "kind": "backtest", "symbol": "LTCUSDT", "tf": "5m", "strategy": "streak_bb", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_bb-LTCUSDT-5m-v2.json"}, {"id": "ev-streak_bb-LTCUSDT-5m-v4", "kind": "backtest", "symbol": "LTCUSDT", "tf": "5m", "strategy": "streak_bb", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_bb-LTCUSDT-5m-v4.json"}, {"id": "ev-streak_bb-SUIUSDT-5m-v2", "kind": "backtest", "symbol": "SUIUSDT", "tf": "5m", "strategy": "streak_bb", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_bb-SUIUSDT-5m-v2.json"}, {"id": "ev-streak_bb-SUIUSDT-5m-v4", "kind": "backtest", "symbol": "SUIUSDT", "tf": "5m", "strategy": "streak_bb", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_bb-SUIUSDT-5m-v4.json"}, {"id": "ev-funding_revert-ARBUSDT-1m-v2", "kind": "backtest", "symbol": "ARBUSDT", "tf": "1m", "strategy": "funding_revert", "days": 360, "train_days": 40, "test_days": 10, "wave": "deep", "status": "done", "result": "results/backtest/ev-funding_revert-ARBUSDT-1m-v2.json"}
+-, {"id": "ev-funding_revert-ARBUSDT-1m-v4", "kind": "backtest", "symbol": "ARBUSDT", "tf": "1m", "strategy": "funding_revert", "days": 720, "train_days": 80, "test_days": 20, "wave": "deep", "status": "done", "result": "results/backtest/ev-funding_revert-ARBUSDT-1m-v4.json"}, {"id": "ev-wick_vol-OPUSDT-15m-v2", "kind": "backtest", "symbol": "OPUSDT", "tf": "15m", "strategy": "wick_vol", "days": 730, "train_days": 90, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-wick_vol-OPUSDT-15m-v2.json"}, {"id": "ev-wick_vol-OPUSDT-15m-v4", "kind": "backtest", "symbol": "OPUSDT", "tf": "15m", "strategy": "wick_vol", "days": 1460, "train_days": 180, "test_days": 56, "wave": "deep", "status": "done", "result": "results/backtest/ev-wick_vol-OPUSDT-15m-v4.json"}, {"id": "ev-qr_revert-ATOMUSDT-1m-v2", "kind": "backtest", "symbol": "ATOMUSDT", "tf": "1m", "strategy": "qr_revert", "days": 360, "train_days": 40, "test_days": 10, "wave": "deep", "status": "done", "result": "results/backtest/ev-qr_revert-ATOMUSDT-1m-v2.json"}, {"id": "ev-qr_revert-ATOMUSDT-1m-v4", "kind": "backtest", "symbol": "ATOMUSDT", "tf": "1m", "strategy": "qr_revert", "days": 720, "train_days": 80, "test_days": 20, "wave": "deep", "status": "done", "result": "results/backtest/ev-qr_revert-ATOMUSDT-1m-v4.json"}, {"id": "ev-wick_vol-AVAXUSDT-15m-v2", "kind": "backtest", "symbol": "AVAXUSDT", "tf": "15m", "strategy": "wick_vol", "days": 730, "train_days": 90, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-wick_vol-AVAXUSDT-15m-v2.json"}, {"id": "ev-wick_vol-AVAXUSDT-15m-v4", "kind": "backtest", "symbol": "AVAXUSDT", "tf": "15m", "strategy": "wick_vol", "days": 1460, "train_days": 180, "test_days": 56, "wave": "deep", "status": "done", "result": "results/backtest/ev-wick_vol-AVAXUSDT-15m-v4.json"}, {"id": "ev-bb_maker-DOTUSDT-1m-v2", "kind": "backtest", "symbol": "DOTUSDT", "tf": "1m", "strategy": "bb_maker", "days": 360, "train_days": 40, "test_day
+-s": 10, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_maker-DOTUSDT-1m-v2.json"}, {"id": "ev-bb_maker-DOTUSDT-1m-v4", "kind": "backtest", "symbol": "DOTUSDT", "tf": "1m", "strategy": "bb_maker", "days": 720, "train_days": 80, "test_days": 20, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_maker-DOTUSDT-1m-v4.json"}, {"id": "ev-qr_revert-DOTUSDT-1m-v2", "kind": "backtest", "symbol": "DOTUSDT", "tf": "1m", "strategy": "qr_revert", "days": 360, "train_days": 40, "test_days": 10, "wave": "deep", "status": "done", "result": "results/backtest/ev-qr_revert-DOTUSDT-1m-v2.json"}, {"id": "ev-qr_revert-DOTUSDT-1m-v4", "kind": "backtest", "symbol": "DOTUSDT", "tf": "1m", "strategy": "qr_revert", "days": 720, "train_days": 80, "test_days": 20, "wave": "deep", "status": "done", "result": "results/backtest/ev-qr_revert-DOTUSDT-1m-v4.json"}, {"id": "ev-bb_maker-NEARUSDT-5m-v2", "kind": "backtest", "symbol": "NEARUSDT", "tf": "5m", "strategy": "bb_maker", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_maker-NEARUSDT-5m-v2.json"}, {"id": "ev-bb_maker-NEARUSDT-5m-v4", "kind": "backtest", "symbol": "NEARUSDT", "tf": "5m", "strategy": "bb_maker", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_maker-NEARUSDT-5m-v4.json"}, {"id": "ev-bollinger_reversion-NEARUSDT-5m-v2", "kind": "backtest", "symbol": "NEARUSDT", "tf": "5m", "strategy": "bollinger_reversion", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-bollinger_reversion-NEARUSDT-5m-v2.json"}, {"id": "ev-bollinger_reversion-NEARUSDT-5m-v4", "kind": "backtest", "symbol": "NEARUSDT", "tf": "5m", "strategy": "bollinger_reversion", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-bollinger_reversion-NEARUSDT-5m-v4.json"}]
+\ No newline at end of file
++[{"id": "ev-bb_maker-NEARUSDT-1m-v2", "kind": "backtest", "symbol": "NEARUSDT", "tf": "1m", "strategy": "bb_maker", "days": 360, "train_days": 40, "test_days": 10, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_maker-NEARUSDT-1m-v2.json"}, {"id": "ev-bb_maker-NEARUSDT-1m-v4", "kind": "backtest", "symbol": "NEARUSDT", "tf": "1m", "strategy": "bb_maker", "days": 720, "train_days": 80, "test_days": 20, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_maker-NEARUSDT-1m-v4.json"}, {"id": "ev-wick_vol-APTUSDT-15m-v2", "kind": "backtest", "symbol": "APTUSDT", "tf": "15m", "strategy": "wick_vol", "days": 730, "train_days": 90, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-wick_vol-APTUSDT-15m-v2.json"}, {"id": "ev-wick_vol-APTUSDT-15m-v4", "kind": "backtest", "symbol": "APTUSDT", "tf": "15m", "strategy": "wick_vol", "days": 1460, "train_days": 180, "test_days": 56, "wave": "deep", "status": "done", "result": "results/backtest/ev-wick_vol-APTUSDT-15m-v4.json"}, {"id": "ev-bb_regime-NEARUSDT-1m-v2", "kind": "backtest", "symbol": "NEARUSDT", "tf": "1m", "strategy": "bb_regime", "days": 360, "train_days": 40, "test_days": 10, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_regime-NEARUSDT-1m-v2.json"}, {"id": "ev-bb_regime-NEARUSDT-1m-v4", "kind": "backtest", "symbol": "NEARUSDT", "tf": "1m", "strategy": "bb_regime", "days": 720, "train_days": 80, "test_days": 20, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_regime-NEARUSDT-1m-v4.json"}, {"id": "ev-vol_burst_revert-ARBUSDT-5m-v2", "kind": "backtest", "symbol": "ARBUSDT", "tf": "5m", "strategy": "vol_burst_revert", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-vol_burst_revert-ARBUSDT-5m-v2.json"}, {"id": "ev-vol_burst_revert-ARBUSDT-5m-v4", "kind": "backtest", "symbol": "ARBUSDT", "tf": "5m", "strategy": "vol_burst_revert", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-vol_burst_revert-ARBUSDT-5m-v4.json"}, {"id": "ev-funding_revert-SUIUSDT-1m-v2", "kind": "backtest", "symbol": "SUIUSDT", "tf": "1m", "strategy": "funding_revert", "days": 360, "train_days": 40, "test_days": 10, "wave": "deep", "status": "done", "result": "results/backtest/ev-funding_revert-SUIUSDT-1m-v2.json"}, {"id": "ev-funding_revert-SUIUSDT-1m-v4", "kind": "backtest", "symbol": "SUIUSDT", "tf": "1m", "strategy": "funding_revert", "days": 720, "train_days": 80, "test_days": 20, "wave": "deep", "status": "done", "result": "results/backtest/ev-funding_revert-SUIUSDT-1m-v4.json"}, {"id": "ev-streak_bb-LTCUSDT-5m-v2", "kind": "backtest", "symbol": "LTCUSDT", "tf": "5m", "strategy": "streak_bb", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_bb-LTCUSDT-5m-v2.json"}, {"id": "ev-streak_bb-LTCUSDT-5m-v4", "kind": "backtest", "symbol": "LTCUSDT", "tf": "5m", "strategy": "streak_bb", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_bb-LTCUSDT-5m-v4.json"}, {"id": "ev-streak_bb-SUIUSDT-5m-v2", "kind": "backtest", "symbol": "SUIUSDT", "tf": "5m", "strategy": "streak_bb", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_bb-SUIUSDT-5m-v2.json"}, {"id": "ev-streak_bb-SUIUSDT-5m-v4", "kind": "backtest", "symbol": "SUIUSDT", "tf": "5m", "strategy": "streak_bb", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_bb-SUIUSDT-5m-v4.json"}, {"id": "ev-funding_revert-ARBUSDT-1m-v2", "kind": "backtest", "symbol": "ARBUSDT", "tf": "1m", "strategy": "funding_revert", "days": 360, "train_days": 40, "test_days": 10, "wave": "deep", "status": "done", "result": "results/backtest/ev-funding_revert-ARBUSDT-1m-v2.json"}, {"id": "ev-funding_revert-ARBUSDT-1m-v4", "kind": "backtest", "symbol": "ARBUSDT", "tf": "1m", "strategy": "funding_revert", "days": 720, "train_days": 80, "test_days": 20, "wave": "deep", "status": "done", "result": "results/backtest/ev-funding_revert-ARBUSDT-1m-v4.json"}, {"id": "ev-wick_vol-OPUSDT-15m-v2", "kind": "backtest", "symbol": "OPUSDT", "tf": "15m", "strategy": "wick_vol", "days": 730, "train_days": 90, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-wick_vol-OPUSDT-15m-v2.json"}, {"id": "ev-wick_vol-OPUSDT-15m-v4", "kind": "backtest", "symbol": "OPUSDT", "tf": "15m", "strategy": "wick_vol", "days": 1460, "train_days": 180, "test_days": 56, "wave": "deep", "status": "done", "result": "results/backtest/ev-wick_vol-OPUSDT-15m-v4.json"}, {"id": "ev-qr_revert-ATOMUSDT-1m-v2", "kind": "backtest", "symbol": "ATOMUSDT", "tf": "1m", "strategy": "qr_revert", "days": 360, "train_days": 40, "test_days": 10, "wave": "deep", "status": "done", "result": "results/backtest/ev-qr_revert-ATOMUSDT-1m-v2.json"}, {"id": "ev-qr_revert-ATOMUSDT-1m-v4", "kind": "backtest", "symbol": "ATOMUSDT", "tf": "1m", "strategy": "qr_revert", "days": 720, "train_days": 80, "test_days": 20, "wave": "deep", "status": "done", "result": "results/backtest/ev-qr_revert-ATOMUSDT-1m-v4.json"}, {"id": "ev-wick_vol-AVAXUSDT-15m-v2", "kind": "backtest", "symbol": "AVAXUSDT", "tf": "15m", "strategy": "wick_vol", "days": 730, "train_days": 90, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-wick_vol-AVAXUSDT-15m-v2.json"}, {"id": "ev-wick_vol-AVAXUSDT-15m-v4", "kind": "backtest", "symbol": "AVAXUSDT", "tf": "15m", "strategy": "wick_vol", "days": 1460, "train_days": 180, "test_days": 56, "wave": "deep", "status": "done", "result": "results/backtest/ev-wick_vol-AVAXUSDT-15m-v4.json"}, {"id": "ev-bb_maker-DOTUSDT-1m-v2", "kind": "backtest", "symbol": "DOTUSDT", "tf": "1m", "strategy": "bb_maker", "days": 360, "train_days": 40, "test_days": 10, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_maker-DOTUSDT-1m-v2.json"}, {"id": "ev-bb_maker-DOTUSDT-1m-v4", "kind": "backtest", "symbol": "DOTUSDT", "tf": "1m", "strategy": "bb_maker", "days": 720, "train_days": 80, "test_days": 20, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_maker-DOTUSDT-1m-v4.json"}, {"id": "ev-qr_revert-DOTUSDT-1m-v2", "kind": "backtest", "symbol": "DOTUSDT", "tf": "1m", "strategy": "qr_revert", "days": 360, "train_days": 40, "test_days": 10, "wave": "deep", "status": "done", "result": "results/backtest/ev-qr_revert-DOTUSDT-1m-v2.json"}, {"id": "ev-qr_revert-DOTUSDT-1m-v4", "kind": "backtest", "symbol": "DOTUSDT", "tf": "1m", "strategy": "qr_revert", "days": 720, "train_days": 80, "test_days": 20, "wave": "deep", "status": "done", "result": "results/backtest/ev-qr_revert-DOTUSDT-1m-v4.json"}, {"id": "ev-bb_maker-NEARUSDT-5m-v2", "kind": "backtest", "symbol": "NEARUSDT", "tf": "5m", "strategy": "bb_maker", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_maker-NEARUSDT-5m-v2.json"}, {"id": "ev-bb_maker-NEARUSDT-5m-v4", "kind": "backtest", "symbol": "NEARUSDT", "tf": "5m", "strategy": "bb_maker", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_maker-NEARUSDT-5m-v4.json"}, {"id": "ev-bollinger_reversion-NEARUSDT-5m-v2", "kind": "backtest", "symbol": "NEARUSDT", "tf": "5m", "strategy": "bollinger_reversion", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-bollinger_reversion-NEARUSDT-5m-v2.json"}, {"id": "ev-bollinger_reversion-NEARUSDT-5m-v4", "kind": "backtest", "symbol": "NEARUSDT", "tf": "5m", "strategy": "bollinger_reversion", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-bollinger_reversion-NEARUSDT-5m-v4.json"}]
+\ No newline at end of file
+diff --git a/engines/scalp/results/queue5.json b/engines/scalp/results/queue5.json
+index cdb1726..a2eae77 100644
+--- a/engines/scalp/results/queue5.json
++++ b/engines/scalp/results/queue5.json
+@@ -1,5 +1 @@
+-[{"id": "ev-bollinger_reversion-ATOMUSDT-15m-v2", "kind": "backtest", "symbol": "ATOMUSDT", "tf": "15m", "strategy": "bollinger_reversion", "days": 730, "train_days": 90, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-bollinger_reversion-ATOMUSDT-15m-v2.json"}, {"id": "ev-bollinger_reversion-ATOMUSDT-15m-v4", "kind": "backtest", "symbol": "ATOMUSDT", "tf": "15m", "strategy": "bollinger_reversion", "days": 1460, "train_days": 180, "test_days": 56, "wave": "deep", "status": "done", "result": "results/backtest/ev-bollinger_reversion-ATOMUSDT-15m-v4.json"}, {"id": "ev-level_fade-APTUSDT-15m-v2", "kind": "backtest", "symbol": "APTUSDT", "tf": "15m", "strategy": "level_fade", "days": 730, "train_days": 90, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-level_fade-APTUSDT-15m-v2.json"}, {"id": "ev-level_fade-APTUSDT-15m-v4", "kind": "backtest", "symbol": "APTUSDT", "tf": "15m", "strategy": "level_fade", "days": 1460, "train_days": 180, "test_days": 56, "wave": "deep", "status": "done", "result": "results/backtest/ev-level_fade-APTUSDT-15m-v4.json"}, {"id": "ev-streak_vol-SUIUSDT-15m-v2", "kind": "backtest", "symbol": "SUIUSDT", "tf": "15m", "strategy": "streak_vol", "days": 730, "train_days": 90, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_vol-SUIUSDT-15m-v2.json"}, {"id": "ev-streak_vol-SUIUSDT-15m-v4", "kind": "backtest", "symbol": "SUIUSDT", "tf": "15m", "strategy": "streak_vol", "days": 1460, "train_days": 180, "test_days": 56, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_vol-SUIUSDT-15m-v4.json"}, {"id": "ev-vol_pop-UNIUSDT-15m-v2", "kind": "backtest", "symbol": "UNIUSDT", "tf": "15m", "strategy": "vol_pop", "days": 730, "train_days": 90, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-vol_pop-UNIUSDT-15m-v2.json"}, {"id": "ev-vol_pop-UNIUSDT-15m-v4", "kind": "backtest", "symbol": "UNIUSDT", "tf
+-": "15m", "strategy": "vol_pop", "days": 1460, "train_days": 180, "test_days": 56, "wave": "deep", "status": "done", "result": "results/backtest/ev-vol_pop-UNIUSDT-15m-v4.json"}, {"id": "ev-spike_follow-DOTUSDT-5m-v2", "kind": "backtest", "symbol": "DOTUSDT", "tf": "5m", "strategy": "spike_follow", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-spike_follow-DOTUSDT-5m-v2.json"}, {"id": "ev-spike_follow-DOTUSDT-5m-v4", "kind": "backtest", "symbol": "DOTUSDT", "tf": "5m", "strategy": "spike_follow", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-spike_follow-DOTUSDT-5m-v4.json"}, {"id": "ev-ema_snap-APTUSDT-15m-v2", "kind": "backtest", "symbol": "APTUSDT", "tf": "15m", "strategy": "ema_snap", "days": 730, "train_days": 90, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-ema_snap-APTUSDT-15m-v2.json"}, {"id": "ev-ema_snap-APTUSDT-15m-v4", "kind": "backtest", "symbol": "APTUSDT", "tf": "15m", "strategy": "ema_snap", "days": 1460, "train_days": 180, "test_days": 56, "wave": "deep", "status": "done", "result": "results/backtest/ev-ema_snap-APTUSDT-15m-v4.json"}, {"id": "ev-streak_vol-APTUSDT-15m-v2", "kind": "backtest", "symbol": "APTUSDT", "tf": "15m", "strategy": "streak_vol", "days": 730, "train_days": 90, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_vol-APTUSDT-15m-v2.json"}, {"id": "ev-streak_vol-APTUSDT-15m-v4", "kind": "backtest", "symbol": "APTUSDT", "tf": "15m", "strategy": "streak_vol", "days": 1460, "train_days": 180, "test_days": 56, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_vol-APTUSDT-15m-v4.json"}, {"id": "ev-streak_bb-NEARUSDT-5m-v2", "kind": "backtest", "symbol": "NEARUSDT", "tf": "5m", "strategy": "streak_bb", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtes
+-t/ev-streak_bb-NEARUSDT-5m-v2.json"}, {"id": "ev-streak_bb-NEARUSDT-5m-v4", "kind": "backtest", "symbol": "NEARUSDT", "tf": "5m", "strategy": "streak_bb", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_bb-NEARUSDT-5m-v4.json"}, {"id": "ev-funding_revert-SUIUSDT-5m-v2", "kind": "backtest", "symbol": "SUIUSDT", "tf": "5m", "strategy": "funding_revert", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-funding_revert-SUIUSDT-5m-v2.json"}, {"id": "ev-funding_revert-SUIUSDT-5m-v4", "kind": "backtest", "symbol": "SUIUSDT", "tf": "5m", "strategy": "funding_revert", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-funding_revert-SUIUSDT-5m-v4.json"}, {"id": "ev-streak_vol-ETHUSDT-15m-v2", "kind": "backtest", "symbol": "ETHUSDT", "tf": "15m", "strategy": "streak_vol", "days": 730, "train_days": 90, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_vol-ETHUSDT-15m-v2.json"}, {"id": "ev-streak_vol-ETHUSDT-15m-v4", "kind": "backtest", "symbol": "ETHUSDT", "tf": "15m", "strategy": "streak_vol", "days": 1460, "train_days": 180, "test_days": 56, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_vol-ETHUSDT-15m-v4.json"}, {"id": "ev-bb_regime-ARBUSDT-5m-v2", "kind": "backtest", "symbol": "ARBUSDT", "tf": "5m", "strategy": "bb_regime", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_regime-ARBUSDT-5m-v2.json"}, {"id": "ev-bb_regime-ARBUSDT-5m-v4", "kind": "backtest", "symbol": "ARBUSDT", "tf": "5m", "strategy": "bb_regime", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_regime-ARBUSDT-5m-v4.json"}, {"id": "ev-streak_bb-LINKUSDT-5m-v2", "kind": "backtest", "symbol": "LINKUSDT", "tf": "5m
+-", "strategy": "streak_bb", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_bb-LINKUSDT-5m-v2.json"}, {"id": "ev-streak_bb-LINKUSDT-5m-v4", "kind": "backtest", "symbol": "LINKUSDT", "tf": "5m", "strategy": "streak_bb", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_bb-LINKUSDT-5m-v4.json"}, {"id": "ev-funding_revert-ARBUSDT-5m-v2", "kind": "backtest", "symbol": "ARBUSDT", "tf": "5m", "strategy": "funding_revert", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-funding_revert-ARBUSDT-5m-v2.json"}, {"id": "ev-funding_revert-ARBUSDT-5m-v4", "kind": "backtest", "symbol": "ARBUSDT", "tf": "5m", "strategy": "funding_revert", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-funding_revert-ARBUSDT-5m-v4.json"}, {"id": "ev-bb_regime-LTCUSDT-5m-v2", "kind": "backtest", "symbol": "LTCUSDT", "tf": "5m", "strategy": "bb_regime", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_regime-LTCUSDT-5m-v2.json"}, {"id": "ev-bb_regime-LTCUSDT-5m-v4", "kind": "backtest", "symbol": "LTCUSDT", "tf": "5m", "strategy": "bb_regime", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_regime-LTCUSDT-5m-v4.json"}, {"id": "ev-qr_revert-APTUSDT-5m-v2", "kind": "backtest", "symbol": "APTUSDT", "tf": "5m", "strategy": "qr_revert", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-qr_revert-APTUSDT-5m-v2.json"}, {"id": "ev-qr_revert-APTUSDT-5m-v4", "kind": "backtest", "symbol": "APTUSDT", "tf": "5m", "strategy": "qr_revert", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/
+-ev-qr_revert-APTUSDT-5m-v4.json"}]
+\ No newline at end of file
++[{"id": "ev-bollinger_reversion-ATOMUSDT-15m-v2", "kind": "backtest", "symbol": "ATOMUSDT", "tf": "15m", "strategy": "bollinger_reversion", "days": 730, "train_days": 90, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-bollinger_reversion-ATOMUSDT-15m-v2.json"}, {"id": "ev-bollinger_reversion-ATOMUSDT-15m-v4", "kind": "backtest", "symbol": "ATOMUSDT", "tf": "15m", "strategy": "bollinger_reversion", "days": 1460, "train_days": 180, "test_days": 56, "wave": "deep", "status": "done", "result": "results/backtest/ev-bollinger_reversion-ATOMUSDT-15m-v4.json"}, {"id": "ev-level_fade-APTUSDT-15m-v2", "kind": "backtest", "symbol": "APTUSDT", "tf": "15m", "strategy": "level_fade", "days": 730, "train_days": 90, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-level_fade-APTUSDT-15m-v2.json"}, {"id": "ev-level_fade-APTUSDT-15m-v4", "kind": "backtest", "symbol": "APTUSDT", "tf": "15m", "strategy": "level_fade", "days": 1460, "train_days": 180, "test_days": 56, "wave": "deep", "status": "done", "result": "results/backtest/ev-level_fade-APTUSDT-15m-v4.json"}, {"id": "ev-streak_vol-SUIUSDT-15m-v2", "kind": "backtest", "symbol": "SUIUSDT", "tf": "15m", "strategy": "streak_vol", "days": 730, "train_days": 90, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_vol-SUIUSDT-15m-v2.json"}, {"id": "ev-streak_vol-SUIUSDT-15m-v4", "kind": "backtest", "symbol": "SUIUSDT", "tf": "15m", "strategy": "streak_vol", "days": 1460, "train_days": 180, "test_days": 56, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_vol-SUIUSDT-15m-v4.json"}, {"id": "ev-vol_pop-UNIUSDT-15m-v2", "kind": "backtest", "symbol": "UNIUSDT", "tf": "15m", "strategy": "vol_pop", "days": 730, "train_days": 90, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-vol_pop-UNIUSDT-15m-v2.json"}, {"id": "ev-vol_pop-UNIUSDT-15m-v4", "kind": "backtest", "symbol": "UNIUSDT", "tf": "15m", "strategy": "vol_pop", "days": 1460, "train_days": 180, "test_days": 56, "wave": "deep", "status": "done", "result": "results/backtest/ev-vol_pop-UNIUSDT-15m-v4.json"}, {"id": "ev-spike_follow-DOTUSDT-5m-v2", "kind": "backtest", "symbol": "DOTUSDT", "tf": "5m", "strategy": "spike_follow", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-spike_follow-DOTUSDT-5m-v2.json"}, {"id": "ev-spike_follow-DOTUSDT-5m-v4", "kind": "backtest", "symbol": "DOTUSDT", "tf": "5m", "strategy": "spike_follow", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-spike_follow-DOTUSDT-5m-v4.json"}, {"id": "ev-ema_snap-APTUSDT-15m-v2", "kind": "backtest", "symbol": "APTUSDT", "tf": "15m", "strategy": "ema_snap", "days": 730, "train_days": 90, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-ema_snap-APTUSDT-15m-v2.json"}, {"id": "ev-ema_snap-APTUSDT-15m-v4", "kind": "backtest", "symbol": "APTUSDT", "tf": "15m", "strategy": "ema_snap", "days": 1460, "train_days": 180, "test_days": 56, "wave": "deep", "status": "done", "result": "results/backtest/ev-ema_snap-APTUSDT-15m-v4.json"}, {"id": "ev-streak_vol-APTUSDT-15m-v2", "kind": "backtest", "symbol": "APTUSDT", "tf": "15m", "strategy": "streak_vol", "days": 730, "train_days": 90, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_vol-APTUSDT-15m-v2.json"}, {"id": "ev-streak_vol-APTUSDT-15m-v4", "kind": "backtest", "symbol": "APTUSDT", "tf": "15m", "strategy": "streak_vol", "days": 1460, "train_days": 180, "test_days": 56, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_vol-APTUSDT-15m-v4.json"}, {"id": "ev-streak_bb-NEARUSDT-5m-v2", "kind": "backtest", "symbol": "NEARUSDT", "tf": "5m", "strategy": "streak_bb", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_bb-NEARUSDT-5m-v2.json"}, {"id": "ev-streak_bb-NEARUSDT-5m-v4", "kind": "backtest", "symbol": "NEARUSDT", "tf": "5m", "strategy": "streak_bb", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_bb-NEARUSDT-5m-v4.json"}, {"id": "ev-funding_revert-SUIUSDT-5m-v2", "kind": "backtest", "symbol": "SUIUSDT", "tf": "5m", "strategy": "funding_revert", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-funding_revert-SUIUSDT-5m-v2.json"}, {"id": "ev-funding_revert-SUIUSDT-5m-v4", "kind": "backtest", "symbol": "SUIUSDT", "tf": "5m", "strategy": "funding_revert", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-funding_revert-SUIUSDT-5m-v4.json"}, {"id": "ev-streak_vol-ETHUSDT-15m-v2", "kind": "backtest", "symbol": "ETHUSDT", "tf": "15m", "strategy": "streak_vol", "days": 730, "train_days": 90, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_vol-ETHUSDT-15m-v2.json"}, {"id": "ev-streak_vol-ETHUSDT-15m-v4", "kind": "backtest", "symbol": "ETHUSDT", "tf": "15m", "strategy": "streak_vol", "days": 1460, "train_days": 180, "test_days": 56, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_vol-ETHUSDT-15m-v4.json"}, {"id": "ev-bb_regime-ARBUSDT-5m-v2", "kind": "backtest", "symbol": "ARBUSDT", "tf": "5m", "strategy": "bb_regime", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_regime-ARBUSDT-5m-v2.json"}, {"id": "ev-bb_regime-ARBUSDT-5m-v4", "kind": "backtest", "symbol": "ARBUSDT", "tf": "5m", "strategy": "bb_regime", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_regime-ARBUSDT-5m-v4.json"}, {"id": "ev-streak_bb-LINKUSDT-5m-v2", "kind": "backtest", "symbol": "LINKUSDT", "tf": "5m", "strategy": "streak_bb", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_bb-LINKUSDT-5m-v2.json"}, {"id": "ev-streak_bb-LINKUSDT-5m-v4", "kind": "backtest", "symbol": "LINKUSDT", "tf": "5m", "strategy": "streak_bb", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-streak_bb-LINKUSDT-5m-v4.json"}, {"id": "ev-funding_revert-ARBUSDT-5m-v2", "kind": "backtest", "symbol": "ARBUSDT", "tf": "5m", "strategy": "funding_revert", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-funding_revert-ARBUSDT-5m-v2.json"}, {"id": "ev-funding_revert-ARBUSDT-5m-v4", "kind": "backtest", "symbol": "ARBUSDT", "tf": "5m", "strategy": "funding_revert", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-funding_revert-ARBUSDT-5m-v4.json"}, {"id": "ev-bb_regime-LTCUSDT-5m-v2", "kind": "backtest", "symbol": "LTCUSDT", "tf": "5m", "strategy": "bb_regime", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_regime-LTCUSDT-5m-v2.json"}, {"id": "ev-bb_regime-LTCUSDT-5m-v4", "kind": "backtest", "symbol": "LTCUSDT", "tf": "5m", "strategy": "bb_regime", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-bb_regime-LTCUSDT-5m-v4.json"}, {"id": "ev-qr_revert-APTUSDT-5m-v2", "kind": "backtest", "symbol": "APTUSDT", "tf": "5m", "strategy": "qr_revert", "days": 730, "train_days": 60, "test_days": 14, "wave": "deep", "status": "done", "result": "results/backtest/ev-qr_revert-APTUSDT-5m-v2.json"}, {"id": "ev-qr_revert-APTUSDT-5m-v4", "kind": "backtest", "symbol": "APTUSDT", "tf": "5m", "strategy": "qr_revert", "days": 1460, "train_days": 120, "test_days": 28, "wave": "deep", "status": "done", "result": "results/backtest/ev-qr_revert-APTUSDT-5m-v4.json"}]
+\ No newline at end of file
+diff --git a/engines/scalp/worker.py b/engines/scalp/worker.py
+index 5f6dd8a..a8b06bb 100644
+--- a/engines/scalp/worker.py
++++ b/engines/scalp/worker.py
+@@ -61,8 +61,7 @@ def load_queues():
+ 
+ def evolve(queues):
+     """All tasks finished: build a new deeper research wave from the
+-   
+- best out-of-sample survivors (longer history, stronger validation)."""
++    best out-of-sample survivors (longer history, stronger validation)."""
+     bts = []
+     for f in glob.glob("results/backtest/*.json"):
+         try:
+@@ -117,8 +116,7 @@ def evolve(queues):
+ 
+ 
+ def frontier(queues):
+-    """Бог-уровень: фронт-волна исследований. Пока сущест
+-вуют
++    """Бог-уровень: фронт-волна исследований. Пока существуют
+     непротестированные комбинации (стратегия x пара x TF), система сама
+     ставит их в очередь. Приоритет - стратегиям, уже доказавшим эдж
+     на других парах (число строк в лидерборде)."""
+@@ -169,8 +167,7 @@ def frontier(queues):
+     path = "results/queue%d.json" % (n + 1)
+     with open(path, "w") as f:
+         json.dump(tasks, f, ensure_ascii=False)
+-    print("frontier: %d untested combos -> %s" % (len(tasks
+-), path), flush=True)
++    print("frontier: %d untested combos -> %s" % (len(tasks), path), flush=True)
+     return len(tasks)
+ 
+ 
+@@ -233,8 +230,7 @@ def rotate_leaders(queues):
+     path = "results/queue%d.json" % (n + 1)
+     with open(path, "w") as fh:
+         json.dump(tasks, fh, ensure_ascii=False)
+-    with open("results/rotation.json", "w") as fh
+-:
++    with open("results/rotation.json", "w") as fh:
+         json.dump({"last_rot": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "tasks": len(tasks)}, fh)
+     print("rotation: %d re-verify tasks -> %s" % (len(tasks), path), flush=True)
+@@ -288,8 +284,7 @@ def main():
+         all_tasks = [x for _, qq in queues for x in qq]
+         save_progress(all_tasks, start, "running")
+     all_tasks = [x for _, qq in queues for x in qq]
+-    pend = sum(1 for t in all_tasks if t.get("status"
+-) == "pending")
++    pend = sum(1 for t in all_tasks if t.get("status") == "pending")
+     if pend == 0:
+         evolve(queues)
+         frontier(queues)
+diff --git a/reporter.py b/reporter.py
+index 0649494..bd730e6 100644
+--- a/reporter.py
++++ b/reporter.py
+@@ -52,8 +52,7 @@ def main():
+     }
+     labm = {
+         "status": lab.get("status"), "status_note": lab.get("status_note"),
+-        "win
+-dows": ldata.get("windows"), "settled": ldata.get("settled"),
++        "windows": ldata.get("windows"), "settled": ldata.get("settled"),
+         "snaps": ldata.get("snaps"), "golden": [g.get("name") for g in (lab.get("golden") or [])],
+         "updated": lab.get("updated"), "age_s": age(lab.get("updated")),
+     }
+@@ -94,8 +93,7 @@ dows": ldata.get("windows"), "settled": ldata.get("settled"),
+     }
+     clobm = {
+         "mode": clob.get("mode"), "note": clob.get("note"), "picked": clob.get("picked"),
+-        "order": clob.get("order"), "error": clob.get("error")
+-,
++        "order": clob.get("order"), "error": clob.get("error"),
+         "updated": clob.get("updated"), "age_s": age(clob.get("updated")),
+     }
+     health = {}
+diff --git a/results/state.json b/results/state.json
+index 46de2b6..287afbe 100644
+--- a/results/state.json
++++ b/results/state.json
+@@ -1,5 +1,5 @@
+ {
+- "cash": 1254.8500640999998,
++ "cash": 702.2708305968912,
+  "positions": {},
+  "closed": [
+   {
+@@ -7,60 +7,65 @@
+    "slug": "btc-updown-15m-1794386700",
+    "outcome": "Up",
+    "entry": 0.12,
+-   "exit": 1.0,
+-   "ret_pct": 316.67,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht15",
+    "opened": "2026-11-11T08:55:32Z",
+    "closed": "2026-11-11T16:43:40Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)",
++   "usd": 49.73
+   },
+   {
+    "question": "Ethereum Up or Down - November 11, 3:45AM-4:00AM ET",
+    "slug": "eth-updown-15m-1794386700",
+    "outcome": "Up",
+    "entry": 0.31,
+-   "exit": 1.0,
+-   "ret_pct": 61.29,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht15",
+    "opened": "2026-11-11T08:55:32Z",
+    "closed": "2026-11-11T16:43:40Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)",
++   "usd": 57.59
+   },
+   {
+    "question": "Bitcoin Up or Down - November 11, 6:00PM-6:15PM ET",
+    "slug": "btc-updown-15m-1794438000",
+    "outcome": "Down",
+    "entry": 0.29,
+-   "exit": 1.0,
+-   "ret_pct": 72.43,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht15",
+    "opened": "2026-11-11T23:04:43Z",
+    "closed": "2026-11-12T03:44:46Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)",
++   "usd": 59.35
+   },
+   {
+    "question": "Ethereum Up or Down - November 11, 6:00PM-6:15PM ET",
+    "slug": "eth-updown-15m-1794438000",
+    "outcome": "Down",
+    "entry": 0.27,
+-   "exit": 1.0,
+-   "ret_pct": 85.2,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht15",
+    "opened": "2026-11-11T23:04:43Z",
+    "closed": "2026-11-12T03:44:46Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)",
++   "usd": 61.49
+   },
+   {
+    "question": "Bitcoin Up or Down - November 12, 6:45AM-7:00AM ET",
+    "slug": "btc-updown-15m-1794483900",
+    "outcome": "Down",
+    "entry": 0.87,
+-   "exit": 1.0,
+-   "ret_pct": -42.53,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht15",
+    "opened": "2026-11-12T11:53:32Z",
+    "closed": "2026-11-12T19:13:47Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)",
++   "usd": 64.11
+   }
+  ],
+  "curve": [
+@@ -219,13 +224,9 @@
+   [
+    "2026-11-20T23:25:05Z",
+    1254.85
+-  ],
+-  [
+-   "2026-11-21T04:06:08Z",
+-   1254.85
+   ]
+  ],
+- "runs": 39,
++ "runs": 38,
+  "done_keys": {},
+  "cal": [
+   {
+@@ -255,17 +256,23 @@
+   }
+  ],
+  "stats": {
+-  "equity": 1254.85,
+-  "cash": 1254.85,
++  "equity": 702.27,
++  "cash": 702.27,
+   "open": 0,
+   "trades": 5,
+-  "wins": 4,
+-  "winrate": 80.0,
+-  "pnl_pct": 25.49,
+-  "updated": "2026-11-21T04:06:08Z",
+-  "runs": 39,
++  "wins": 0,
++  "winrate": 0.0,
++  "pnl_pct": -29.77,
++  "updated": "2026-11-21T03:03:35Z",
++  "runs": 38,
+   "sht_open": 0,
+   "sht_trades": 5,
+-  "sht_pnl": 255.41
++  "sht_pnl": -292.27
++ },
++ "audit": {
++  "multi_fix_2026_11_21": {
++   "fake_wins_fixed": 5,
++   "cash_delta": -552.58
++  }
+  }
+ }
+\ No newline at end of file
+diff --git a/results/universe.json b/results/universe.json
+index 8e089e0..3c92215 100644
+--- a/results/universe.json
++++ b/results/universe.json
+@@ -1,315 +1 @@
+-{
+- "updated": "2026-11-10T16:58:08Z",
+- "health": {
+-  "overall": "degraded",
+-  "modules": {
+-   "pm_worker": "ok",
+-   "pm_lab": "ok",
+-   "scalp_worker": "ok",
+-   "okx_trader": "warmup",
+-   "pm_trader": "warmup"
+-  }
+- },
+- "pm": {
+-  "equity": 2057.6,
+-  "pnl_pct": 105.76,
+-  "trades": 66,
+-  "winrate": 47.0,
+-  "open": 0,
+-  "sht_open": 0,
+-  "sht_trades": 66,
+-  "sht_pnl": 1061.76,
+-  "cal": {
+-   "n": 66,
+-   "brier": 0.2329,
+-   "acc": 47.0
+-  },
+-  "updated": "2026-11-10T16:56:25Z",
+-  "age_s": 103.0
+- },
+- "pm_lab": {
+-  "status": "ready",
+-  "status_note": "База достаточна. Подтвержднных OOS закономерностей: 1 из 8 гипотез.",
+-  "windows": 3138,
+-  "settled": 2148,
+-  "snaps": 8852,
+-  "golden": [
+-   "Модель точнее монетки"
+-  ],
+-  "updated": "2026-11-10T16:58:08Z",
+-  "age_s": 0.0
+- },
+- "scalp": {
+-  "done": 2662,
+-  "total": 2662,
+-  "errors": 0,
+-  "pending": 0,
+-  "updated": "2026-11-10T16:34:34Z",
+-  "age_s": 1414.0,
+-  "paper": {
+-   "equity": 1118.16,
+-   "pnl_pct": 11.82,
+-   "trades": 46,
+-   "winrate": 71.7,
+-   "open": 3,
+-   "tops": 6
+-  },
+-  "paper_updated": "2026-11-10T16:34:58Z",
+-  "leaderboard": [
+-   {
+-    "strategy": "bb_maker",
+-    "symbol": "NEARUSDT",
+-    "tf": "1m",
+-    "oos_sharpe": "3.004",
+-    "oos_pf": "1.018",
+-    "oos_t": "1.96",
+-    "trades": "3533",
+-    "param_stability": "0.29",
+-    "is_sharpe_avg": "5.43",
+-    "folds": "31",
+-    "fee_mode": "maker",
+-    "maker_sharpe": "3.0038831475868513",
+-    "maker_pf": "1.0180674488920978",
+-    "daily_pct": "0.004493",
+-    "monthly_pct": "0.143936",
+-    "trades_per_day": "19.63",
+-    "usd_per_month_1000": "143.94"
+-   },
+-   {
+-    "strategy": "funding_revert",
+-    "symbol": "SUIUSDT",
+-    "tf": "1m",
+-    "oos_sharpe": "2.774",
+-    "oos_pf": "1.034",
+-    "oos_t": "1.81",
+-    "trades": "788",
+-    "param_stability": "0.29",
+-    "is_sharpe_avg": "4.49",
+-    "folds": "31",
+-    "fee_mode": "maker",
+-    "maker_sharpe": "2.7743331954397203",
+-    "maker_pf": "1.033574008505993",
+-    "daily_pct": "0.001693",
+-    "monthly_pct": "0.052047",
+-    "tr
+-ades_per_day": "4.38",
+-    "usd_per_month_1000": "52.05"
+-   },
+-   {
+-    "strategy": "bb_regime",
+-    "symbol": "NEARUSDT",
+-    "tf": "1m",
+-    "oos_sharpe": "2.767",
+-    "oos_pf": "1.017",
+-    "oos_t": "1.8",
+-    "trades": "2648",
+-    "param_stability": "0.32",
+-    "is_sharpe_avg": "5.04",
+-    "folds": "31",
+-    "fee_mode": "maker",
+-    "maker_sharpe": "2.7665372539292243",
+-    "maker_pf": "1.0172181236265705",
+-    "daily_pct": "0.004123",
+-    "monthly_pct": "0.131386",
+-    "trades_per_day": "14.71",
+-    "usd_per_month_1000": "131.39"
+-   },
+-   {
+-    "strategy": "vol_burst_revert",
+-    "symbol": "ARBUSDT",
+-    "tf": "5m",
+-    "oos_sharpe": "1.935",
+-    "oos_pf": "1.029",
+-    "oos_t": "1.84",
+-    "trades": "894",
+-    "param_stability": "0.26",
+-    "is_sharpe_avg": "4.25",
+-    "folds": "47",
+-    "fee_mode": "maker",
+-    "maker_sharpe": "1.9345995554905253",
+-    "maker_pf": "1.0292257515978214",
+-    "daily_pct": "0.002234",
+-    "monthly_pct": "0.069224",
+-    "trades_per_day": "2.45",
+-    "usd_per_month_1000": "69.22"
+-   },
+-   {
+-    "strategy": "wick_vol",
+-    "symbol": "OPUSDT",
+-    "tf": "15m",
+-    "oos_sharpe": "1.926",
+-    "oos_pf": "1.06",
+-    "oos_t": "1.77",
+-    "trades": "481",
+-    "param_stability": "0.23",
+-    "is_sharpe_avg": "4.68",
+-    "folds": "22",
+-    "fee_mode": "maker",
+-    "maker_sharpe": "1.925813634658203",
+-    "maker_pf": "1.0600588209386734",
+-    "daily_pct": "0.001777",
+-    "monthly_pct": "0.054707",
+-    "trades_per_day": "1.32",
+-    "usd_per_month_1000": "54.71"
+-   },
+-   {
+-    "strategy": "funding_revert",
+-    "symbol": "ARBUSDT",
+-    "tf": "1m",
+-    "oos_sharpe": "1.874",
+-    "oos_pf": "1.023",
+-    "oos_t": "1.22",
+-    "trades": "836",
+-    "param_stability": "0.32",
+-    "is_sharpe_avg": "3.36",
+-    "folds": "31",
+-    "fee_mode": "maker",
+-    "maker_sharpe": "1.8737764942896091",
+-    "maker_pf": "1.0227638479207544",
+-    "daily_pct": "0.001472",
+-    "monthly_pct": "0.04511",
+-    "trades_per_day": "4.64",
+-    "usd_per_month_1000": "45.11"
+-   },
+-  
+- {
+-    "strategy": "streak_bb",
+-    "symbol": "SUIUSDT",
+-    "tf": "5m",
+-    "oos_sharpe": "1.839",
+-    "oos_pf": "1.018",
+-    "oos_t": "1.75",
+-    "trades": "2537",
+-    "param_stability": "0.36",
+-    "is_sharpe_avg": "3.02",
+-    "folds": "47",
+-    "fee_mode": "maker",
+-    "maker_sharpe": "1.8385225030642918",
+-    "maker_pf": "1.0182821444892423",
+-    "daily_pct": "0.002395",
+-    "monthly_pct": "0.074388",
+-    "trades_per_day": "6.95",
+-    "usd_per_month_1000": "74.39"
+-   },
+-   {
+-    "strategy": "wick_vol",
+-    "symbol": "AVAXUSDT",
+-    "tf": "15m",
+-    "oos_sharpe": "1.443",
+-    "oos_pf": "1.05",
+-    "oos_t": "1.33",
+-    "trades": "474",
+-    "param_stability": "0.18",
+-    "is_sharpe_avg": "4.78",
+-    "folds": "22",
+-    "fee_mode": "maker",
+-    "maker_sharpe": "1.4432749215141845",
+-    "maker_pf": "1.050285349871476",
+-    "daily_pct": "0.0011",
+-    "monthly_pct": "0.033531",
+-    "trades_per_day": "1.3",
+-    "usd_per_month_1000": "33.53"
+-   },
+-   {
+-    "strategy": "streak_bb",
+-    "symbol": "LTCUSDT",
+-    "tf": "5m",
+-    "oos_sharpe": "1.38",
+-    "oos_pf": "1.014",
+-    "oos_t": "1.31",
+-    "trades": "2401",
+-    "param_stability": "0.4",
+-    "is_sharpe_avg": "4.12",
+-    "folds": "47",
+-    "fee_mode": "maker",
+-    "maker_sharpe": "1.3796454760628332",
+-    "maker_pf": "1.0138965522534376",
+-    "daily_pct": "0.001451",
+-    "monthly_pct": "0.044461",
+-    "trades_per_day": "6.58",
+-    "usd_per_month_1000": "44.46"
+-   },
+-   {
+-    "strategy": "vol_pop",
+-    "symbol": "UNIUSDT",
+-    "tf": "15m",
+-    "oos_sharpe": "1.147",
+-    "oos_pf": "1.061",
+-    "oos_t": "1.49",
+-    "trades": "733",
+-    "param_stability": "0.27",
+-    "is_sharpe_avg": "2.27",
+-    "folds": "22",
+-    "fee_mode": "taker",
+-    "maker_sharpe": "1.4868229034636196",
+-    "maker_pf": "1.0803805467531067",
+-    "daily_pct": "0.001068",
+-    "monthly_pct": "0.032527",
+-    "trades_per_day": "1.0",
+-    "usd_per_month_1000": "32.53"
+-   },
+-   {
+-    "strategy": "streak_vol",
+-    "symbol": "APTUSDT",
+-    "tf": "15m",
+-    "oo
+-s_sharpe": "0.662",
+-    "oos_pf": "1.023",
+-    "oos_t": "1.22",
+-    "trades": "1337",
+-    "param_stability": "0.27",
+-    "is_sharpe_avg": "1.65",
+-    "folds": "22",
+-    "fee_mode": "maker",
+-    "maker_sharpe": "0.6624406244075641",
+-    "maker_pf": "1.0232863838448905",
+-    "daily_pct": "0.000575",
+-    "monthly_pct": "0.017388",
+-    "trades_per_day": "0.92",
+-    "usd_per_month_1000": "17.39"
+-   },
+-   {
+-    "strategy": "bb_maker",
+-    "symbol": "NEARUSDT",
+-    "tf": "5m",
+-    "oos_sharpe": "0.57",
+-    "oos_pf": "1.008",
+-    "oos_t": "1.08",
+-    "trades": "6923",
+-    "param_stability": "0.28",
+-    "is_sharpe_avg": "1.55",
+-    "folds": "47",
+-    "fee_mode": "maker",
+-    "maker_sharpe": "0.5698047959154579",
+-    "maker_pf": "1.0076062584893621",
+-    "daily_pct": "0.000725",
+-    "monthly_pct": "0.021989",
+-    "trades_per_day": "4.74",
+-    "usd_per_month_1000": "21.99"
+-   }
+-  ]
+- },
+- "okx": {
+-  "mode": null,
+-  "demo": null,
+-  "equity": null,
+-  "pnl_pct": null,
+-  "trades": null,
+-  "open": null,
+-  "signals": null,
+-  "paper_positions": {},
+-  "live_positions": {},
+-  "errors": null,
+-  "updated": null,
+-  "age_s": null
+- },
+- "clob": {
+-  "mode": null,
+-  "note": null,
+-  "picked": null,
+-  "order": null,
+-  "error": null,
+-  "updated": null,
+-  "age_s": null
+- }
+-}
+\ No newline at end of file
++{ "updated": "2026-11-10T16:58:08Z", "health": {  "overall": "degraded",  "modules": {   "pm_worker": "ok",   "pm_lab": "ok",   "scalp_worker": "ok",   "okx_trader": "warmup",   "pm_trader": "warmup"  } }, "pm": {  "equity": 2057.6,  "pnl_pct": 105.76,  "trades": 66,  "winrate": 47.0,  "open": 0,  "sht_open": 0,  "sht_trades": 66,  "sht_pnl": 1061.76,  "cal": {   "n": 66,   "brier": 0.2329,   "acc": 47.0  },  "updated": "2026-11-10T16:56:25Z",  "age_s": 103.0 }, "pm_lab": {  "status": "ready",  "status_note": "База достаточна. Подтвержднных OOS закономерностей: 1 из 8 гипотез.",  "windows": 3138,  "settled": 2148,  "snaps": 8852,  "golden": [   "Модель точнее монетки"  ],  "updated": "2026-11-10T16:58:08Z",  "age_s": 0.0 }, "scalp": {  "done": 2662,  "total": 2662,  "errors": 0,  "pending": 0,  "updated": "2026-11-10T16:34:34Z",  "age_s": 1414.0,  "paper": {   "equity": 1118.16,   "pnl_pct": 11.82,   "trades": 46,   "winrate": 71.7,   "open": 3,   "tops": 6  },  "paper_updated": "2026-11-10T16:34:58Z",  "leaderboard": [   {    "strategy": "bb_maker",    "symbol": "NEARUSDT",    "tf": "1m",    "oos_sharpe": "3.004",    "oos_pf": "1.018",    "oos_t": "1.96",    "trades": "3533",    "param_stability": "0.29",    "is_sharpe_avg": "5.43",    "folds": "31",    "fee_mode": "maker",    "maker_sharpe": "3.0038831475868513",    "maker_pf": "1.0180674488920978",    "daily_pct": "0.004493",    "monthly_pct": "0.143936",    "trades_per_day": "19.63",    "usd_per_month_1000": "143.94"   },   {    "strategy": "funding_revert",    "symbol": "SUIUSDT",    "tf": "1m",    "oos_sharpe": "2.774",    "oos_pf": "1.034",    "oos_t": "1.81",    "trades": "788",    "param_stability": "0.29",    "is_sharpe_avg": "4.49",    "folds": "31",    "fee_mode": "maker",    "maker_sharpe": "2.7743331954397203",    "maker_pf": "1.033574008505993",    "daily_pct": "0.001693",    "monthly_pct": "0.052047",    "trades_per_day": "4.38",    "usd_per_month_1000": "52.05"   },   {    "strategy": "bb_regime",    "symbol": "NEARUSDT",    "tf": "1m",    "oos_sharpe": "2.767",    "oos_pf": "1.017",    "oos_t": "1.8",    "trades": "2648",    "param_stability": "0.32",    "is_sharpe_avg": "5.04",    "folds": "31",    "fee_mode": "maker",    "maker_sharpe": "2.7665372539292243",    "maker_pf": "1.0172181236265705",    "daily_pct": "0.004123",    "monthly_pct": "0.131386",    "trades_per_day": "14.71",    "usd_per_month_1000": "131.39"   },   {    "strategy": "vol_burst_revert",    "symbol": "ARBUSDT",    "tf": "5m",    "oos_sharpe": "1.935",    "oos_pf": "1.029",    "oos_t": "1.84",    "trades": "894",    "param_stability": "0.26",    "is_sharpe_avg": "4.25",    "folds": "47",    "fee_mode": "maker",    "maker_sharpe": "1.9345995554905253",    "maker_pf": "1.0292257515978214",    "daily_pct": "0.002234",    "monthly_pct": "0.069224",    "trades_per_day": "2.45",    "usd_per_month_1000": "69.22"   },   {    "strategy": "wick_vol",    "symbol": "OPUSDT",    "tf": "15m",    "oos_sharpe": "1.926",    "oos_pf": "1.06",    "oos_t": "1.77",    "trades": "481",    "param_stability": "0.23",    "is_sharpe_avg": "4.68",    "folds": "22",    "fee_mode": "maker",    "maker_sharpe": "1.925813634658203",    "maker_pf": "1.0600588209386734",    "daily_pct": "0.001777",    "monthly_pct": "0.054707",    "trades_per_day": "1.32",    "usd_per_month_1000": "54.71"   },   {    "strategy": "funding_revert",    "symbol": "ARBUSDT",    "tf": "1m",    "oos_sharpe": "1.874",    "oos_pf": "1.023",    "oos_t": "1.22",    "trades": "836",    "param_stability": "0.32",    "is_sharpe_avg": "3.36",    "folds": "31",    "fee_mode": "maker",    "maker_sharpe": "1.8737764942896091",    "maker_pf": "1.0227638479207544",    "daily_pct": "0.001472",    "monthly_pct": "0.04511",    "trades_per_day": "4.64",    "usd_per_month_1000": "45.11"   },   {    "strategy": "streak_bb",    "symbol": "SUIUSDT",    "tf": "5m",    "oos_sharpe": "1.839",    "oos_pf": "1.018",    "oos_t": "1.75",    "trades": "2537",    "param_stability": "0.36",    "is_sharpe_avg": "3.02",    "folds": "47",    "fee_mode": "maker",    "maker_sharpe": "1.8385225030642918",    "maker_pf": "1.0182821444892423",    "daily_pct": "0.002395",    "monthly_pct": "0.074388",    "trades_per_day": "6.95",    "usd_per_month_1000": "74.39"   },   {    "strategy": "wick_vol",    "symbol": "AVAXUSDT",    "tf": "15m",    "oos_sharpe": "1.443",    "oos_pf": "1.05",    "oos_t": "1.33",    "trades": "474",    "param_stability": "0.18",    "is_sharpe_avg": "4.78",    "folds": "22",    "fee_mode": "maker",    "maker_sharpe": "1.4432749215141845",    "maker_pf": "1.050285349871476",    "daily_pct": "0.0011",    "monthly_pct": "0.033531",    "trades_per_day": "1.3",    "usd_per_month_1000": "33.53"   },   {    "strategy": "streak_bb",    "symbol": "LTCUSDT",    "tf": "5m",    "oos_sharpe": "1.38",    "oos_pf": "1.014",    "oos_t": "1.31",    "trades": "2401",    "param_stability": "0.4",    "is_sharpe_avg": "4.12",    "folds": "47",    "fee_mode": "maker",    "maker_sharpe": "1.3796454760628332",    "maker_pf": "1.0138965522534376",    "daily_pct": "0.001451",    "monthly_pct": "0.044461",    "trades_per_day": "6.58",    "usd_per_month_1000": "44.46"   },   {    "strategy": "vol_pop",    "symbol": "UNIUSDT",    "tf": "15m",    "oos_sharpe": "1.147",    "oos_pf": "1.061",    "oos_t": "1.49",    "trades": "733",    "param_stability": "0.27",    "is_sharpe_avg": "2.27",    "folds": "22",    "fee_mode": "taker",    "maker_sharpe": "1.4868229034636196",    "maker_pf": "1.0803805467531067",    "daily_pct": "0.001068",    "monthly_pct": "0.032527",    "trades_per_day": "1.0",    "usd_per_month_1000": "32.53"   },   {    "strategy": "streak_vol",    "symbol": "APTUSDT",    "tf": "15m",    "oos_sharpe": "0.662",    "oos_pf": "1.023",    "oos_t": "1.22",    "trades": "1337",    "param_stability": "0.27",    "is_sharpe_avg": "1.65",    "folds": "22",    "fee_mode": "maker",    "maker_sharpe": "0.6624406244075641",    "maker_pf": "1.0232863838448905",    "daily_pct": "0.000575",    "monthly_pct": "0.017388",    "trades_per_day": "0.92",    "usd_per_month_1000": "17.39"   },   {    "strategy": "bb_maker",    "symbol": "NEARUSDT",    "tf": "5m",    "oos_sharpe": "0.57",    "oos_pf": "1.008",    "oos_t": "1.08",    "trades": "6923",    "param_stability": "0.28",    "is_sharpe_avg": "1.55",    "folds": "47",    "fee_mode": "maker",    "maker_sharpe": "0.5698047959154579",    "maker_pf": "1.0076062584893621",    "daily_pct": "0.000725",    "monthly_pct": "0.021989",    "trades_per_day": "4.74",    "usd_per_month_1000": "21.99"   }  ] }, "okx": {  "mode": null,  "demo": null,  "equity": null,  "pnl_pct": null,  "trades": null,  "open": null,  "signals": null,  "paper_positions": {},  "live_positions": {},  "errors": null,  "updated": null,  "age_s": null }, "clob": {  "mode": null,  "note": null,  "picked": null,  "order": null,  "error": null,  "updated": null,  "age_s": null }}
+\ No newline at end of file
+-- 
+2.47.3
+

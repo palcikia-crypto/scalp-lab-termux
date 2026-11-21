@@ -1,0 +1,117 @@
+From d368bf132f2452bfc69ab8e8f4764f0eb3a3e644 Mon Sep 17 00:00:00 2001
+From: Vibe Nuage Agent <vibe@mistral.ai>
+Date: Sat, 21 Nov 2026 04:36:45 +0000
+Subject: [PATCH] risk: adaptive drawdown ladder (stake x0.5/x0.25/x0.1 at
+ 10/20/30% DD) + DAY_LOSS_PCT=10 enabled; equity_peak backfilled from trades
+
+---
+ .github/workflows/paper.yml |  7 +++++++
+ config.py                   |  9 ++++++++-
+ paper.py                    | 26 +++++++++++++++++++++++++-
+ 3 files changed, 40 insertions(+), 2 deletions(-)
+
+diff --git a/.github/workflows/paper.yml b/.github/workflows/paper.yml
+index 5168cdb..20ecec9 100644
+--- a/.github/workflows/paper.yml
++++ b/.github/workflows/paper.yml
+@@ -38,6 +38,13 @@ jobs:
+           PAPER_MAX_RUNTIME: '330'
+           PAPER_POLL_SEC: '4'
+           PAPER_STATE_FILE: 'paper_state.json'
++          DAY_LOSS_PCT: '10'
++          RISK_DD_STEP1: '10'
++          RISK_DD_STEP2: '20'
++          RISK_DD_STEP3: '30'
++          RISK_MULT1: '0.5'
++          RISK_MULT2: '0.25'
++          RISK_MULT3: '0.1'
+         run: python paper.py
+ 
+       - name: Commit state
+diff --git a/config.py b/config.py
+index 5fb3e9f..a81dc8e 100644
+--- a/config.py
++++ b/config.py
+@@ -38,9 +38,16 @@ SL_MAX_PCT = 0.0060
+ RR = float(os.getenv('RR', '2.5'))
+ 
+ RISK_PER_TRADE_PCT = float(os.getenv('RISK_PER_TRADE_PCT', '1.0')) / 100.0
++# адаптивная лестница риска: доля от базового риска при просадке equity от пика
++RISK_DD_STEP1 = float(os.getenv('RISK_DD_STEP1', '10')) / 100.0
++RISK_DD_STEP2 = float(os.getenv('RISK_DD_STEP2', '20')) / 100.0
++RISK_DD_STEP3 = float(os.getenv('RISK_DD_STEP3', '30')) / 100.0
++RISK_MULT1 = float(os.getenv('RISK_MULT1', '0.5'))
++RISK_MULT2 = float(os.getenv('RISK_MULT2', '0.25'))
++RISK_MULT3 = float(os.getenv('RISK_MULT3', '0.1'))
+ LEVERAGE = int(os.getenv('LEVERAGE', '10'))
+ MAX_POSITIONS = int(os.getenv('MAX_POSITIONS', '4'))
+-DAY_LOSS_PCT = float(os.getenv('DAY_LOSS_PCT', '0')) / 100.0
++DAY_LOSS_PCT = float(os.getenv('DAY_LOSS_PCT', '10')) / 100.0
+ 
+ ENTRY_TIMEOUT_S = float(os.getenv('ENTRY_TIMEOUT_S', '8'))
+ BE_TRIGGER = float(os.getenv('BE_TRIGGER', '1.2'))
+diff --git a/paper.py b/paper.py
+index 8b17cd3..14754c1 100644
+--- a/paper.py
++++ b/paper.py
+@@ -39,6 +39,10 @@ class PaperBot:
+         self.equity = float(self.state.get("equity", START_EQUITY))
+         self.day = self.state.get("day")
+         self.day_start_eq = float(self.state.get("day_start_equity", self.equity))
++        self.equity_peak = self.state.get("equity_peak")
++        if self.equity_peak is None:
++            self.equity_peak = self._replay_peak()
++        self.equity_peak = max(float(self.equity_peak), self.equity)
+         self.trades = self.state.get("trades", [])
+         self.open = {}
+         self.day_paused = None
+@@ -53,10 +57,21 @@ class PaperBot:
+     def _save(self):
+         self.state.update({"equity": self.equity, "day": self.day,
+                            "day_start_equity": self.day_start_eq,
++                           "equity_peak": self.equity_peak,
+                            "trades": self.trades[-400:]})
+         with open(PAPER_STATE_FILE, "w") as f:
+             json.dump(self.state, f, indent=1)
+ 
++    def _replay_peak(self):
++        eq = START_EQUITY
++        peak = eq
++        for t in self.trades:
++            if t.get("open"):
++                continue
++            eq += float(t.get("pnl", 0.0))
++            peak = max(peak, eq)
++        return peak
++
+     def _adopt_open(self):
+         for t in self.trades:
+             if t.get("open"):
+@@ -127,7 +142,15 @@ class PaperBot:
+         if sl_d <= 0:
+             return
+         tp_d = RM.tp_distance(sl_d)
+-        risk_usdt = self.equity * C.RISK_PER_TRADE_PCT
++        dd = (self.equity_peak - self.equity) / self.equity_peak if self.equity_peak > 0 else 0.0
++        mult = 1.0
++        if dd >= C.RISK_DD_STEP3:
++            mult = C.RISK_MULT3
++        elif dd >= C.RISK_DD_STEP2:
++            mult = C.RISK_MULT2
++        elif dd >= C.RISK_DD_STEP1:
++            mult = C.RISK_MULT1
++        risk_usdt = self.equity * C.RISK_PER_TRADE_PCT * mult
+         qty = risk_usdt / sl_d
+         if qty <= 0:
+             return
+@@ -180,6 +203,7 @@ class PaperBot:
+         t.update({"open": False, "exit": exit_px, "pnl": round(pnl, 4),
+                   "reason": reason, "exit_ms": int(time.time() * 1000)})
+         self.open.pop(t["symbol"], None)
++        self.equity_peak = max(self.equity_peak, self.equity)
+         self._save()
+         tag = "+" if pnl >= 0 else ""
+         print(f"[CLOSE] {t['symbol']} {t['side']} {reason}: {tag}{pnl:.4f} USDT "
+-- 
+2.47.3
+

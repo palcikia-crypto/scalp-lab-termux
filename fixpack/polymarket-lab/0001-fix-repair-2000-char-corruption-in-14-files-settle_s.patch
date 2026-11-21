@@ -1,0 +1,3200 @@
+From ebc92870cbd5de391e0c7e1d8c660c0bf395ef69 Mon Sep 17 00:00:00 2001
+From: Vibe Nuage Agent <vibe@mistral.ai>
+Date: Sat, 21 Nov 2026 03:05:58 +0000
+Subject: [PATCH] fix: repair 2000-char corruption in 14 files; settle_sht() no
+ more fake wins (7d grace -> breakeven); honest state rebuild 17W/17L; restore
+ autolab/lab.py
+
+---
+ arbitrage/sources.py                    |   3 +-
+ autolab/lab.py                          |  61 +-
+ autolab/worker.py                       |  18 +-
+ config/__init__.py                      |   9 +-
+ results/lab.json                        | 763 +-----------------------
+ results/scan.json                       |   4 +-
+ results/sht.json                        | 222 +++----
+ results/sht_errors.json                 |   6 +-
+ results/sht_lab.json                    | 102 ++++
+ results/signals.json                    |  37 +-
+ results/state.json                      | 440 ++++++++------
+ src/backend/api/dashboard.py            |  12 +-
+ src/backend/api/markets.py              |  15 +-
+ src/backend/api/paper_trading.py        |  15 +-
+ src/backend/api/signals.py              |  12 +-
+ src/backend/automation/notifier.py      |   6 +-
+ src/backend/automation/paper_trading.py |  24 +-
+ src/backend/automation/scheduler.py     |  24 +-
+ src/backend/automation/trader.py        |  24 +-
+ src/backend/edge_finder/scanner.py      |   1 -
+ src/backend/edge_finder/signals.py      |   1 -
+ src/backend/models/schemas.py           |  24 +-
+ src/backend/utils/logger.py             |   3 +-
+ 23 files changed, 607 insertions(+), 1219 deletions(-)
+ delete mode 100644 src/backend/edge_finder/scanner.py
+ delete mode 100644 src/backend/edge_finder/signals.py
+
+diff --git a/arbitrage/sources.py b/arbitrage/sources.py
+index 614986c..ede937d 100644
+--- a/arbitrage/sources.py
++++ b/arbitrage/sources.py
+@@ -73,6 +73,5 @@ def fetch_steam(name):
+     data = r.json()
+     if not data.get("success"):
+         return None
+-    return {"price": parse_pric
+-e(data.get("lowest_price")),
++    return {"price": parse_price(data.get("lowest_price")),
+             "volume": parse_volume(data.get("volume"))}
+diff --git a/autolab/lab.py b/autolab/lab.py
+index 7795e03..500f0a7 100644
+--- a/autolab/lab.py
++++ b/autolab/lab.py
+@@ -42,8 +42,7 @@ def fetch(url, timeout=12):
+ 
+ def jload(path, default):
+     try:
+-        with open(path) as f: return json.
+-load(f)
++        with open(path) as f: return json.load(f)
+     except Exception: return default
+ 
+ def jsave(path, obj):
+@@ -98,8 +97,7 @@ def backfill(lab):
+                 slug = ev.get("slug", "")
+                 mm = re.search(r"(\d{9,})$", slug)
+                 if not mm or slug in lab: continue
+-                src = ev if ev.get("outcomePrices") else (ev.get("market
+-s") or [{}])[0]
++                src = ev if ev.get("outcomePrices") else (ev.get("markets") or [{}])[0]
+                 pr = [fnum(x) for x in plist(src.get("outcomePrices", "[]"))]
+                 if len(pr) != 2 or max(pr) < 0.99: continue
+                 start = int(mm.group(1))
+@@ -112,7 +110,7 @@ s") or [{}])[0]
+     return added
+ 
+ def settle(lab):
+-    """Разметка исходов: у закрытых окон берм реальный расчт Polymarket."""
++    """Разметка исходов: у закрытых окон берём реальный расчёт Polymarket."""
+     t_now = time.time()
+     done = 0
+     cands = [(e["end"], k) for k, e in lab.items()
+@@ -129,7 +127,7 @@ def settle(lab):
+         except Exception:
+             pr = None
+         if not pr or len(pr) != 2 or max(pr) < 0.99:
+-            # закрытые окна удаляются из /markets - берм исход из /events
++            # закрытые окна удаляются из /markets - берём исход из /events
+             try:
+                 ev = fetch(GAMMA + "/events?slug=" + k, 10)
+                 if isinstance(ev, list) and ev:
+@@ -145,8 +143,7 @@ def settle(lab):
+ 
+ def windows_sorted(lab):
+     ws = [dict(e, slug=k) for k, e in lab.items() if e.get("outcome") is not None]
+-    ws.sort(key=lambda w: w["star
+-t"])
++    ws.sort(key=lambda w: w["start"])
+     return ws
+ 
+ def split_ids(ws):
+@@ -190,8 +187,7 @@ def model_stats(ws, ids_is):
+         "mkt_cmp": {"is": fm(brier(per["is"], 0), brier(per["is"], 1)), "oos": fm(brier(per["oos"], 0), brier(per["oos"], 1))},
+         "mkt_brier": {"is": brier(per["is"], 1), "oos": brier(per["oos"], 1)},
+         "blend": {"is": bl(per["is"]), "oos": bl(per["oos"])},
+-        "per_tag": {t: {"n": len(v), "brier": brier(v, 0), "acc": acc(v
+-, 0)} for t, v in sorted(per_tag.items())},
++        "per_tag": {t: {"n": len(v), "brier": brier(v, 0), "acc": acc(v, 0)} for t, v in sorted(per_tag.items())},
+     }
+ 
+ def rule_trades(ws, ids_is):
+@@ -235,8 +231,7 @@ def calib_bins(ws, ids_is):
+             if x[0] >= w["start"] and x[1] is not None:
+                 s = x
+         if s is None: continue
+-        rows.app
+-end((s[1], w["outcome"], "is" if w["slug"] in ids_is else "oos"))
++        rows.append((s[1], w["outcome"], "is" if w["slug"] in ids_is else "oos"))
+     bins = []
+     for i in range(20):
+         lo, hi = i / 20.0, (i + 1) / 20.0
+@@ -280,8 +275,7 @@ def streak_stats(ws):
+                     dn_n += 1; dn_w += seq[i]
+             pu = up_w / up_n if up_n >= 30 else None
+             pd = dn_w / dn_n if dn_n >= 30 else None
+-    
+-        out.append({"tag": tag, "k": k, "n_up": up_n,
++            out.append({"tag": tag, "k": k, "n_up": up_n,
+                         "p_after_up": None if pu is None else round(pu, 3),
+                         "n_dn": dn_n, "p_after_dn": None if pd is None else round(pd, 3)})
+     return out
+@@ -326,8 +320,7 @@ def streak_edge(ws):
+                 if px < PX_MIN or px > PX_MAX: continue
+                 if not s[3] or s[3] < MIN_LIQ: continue
+                 win = 1 if ((w["outcome"] == 1) == (side == "Up")) else 0
+-                pnl = (1.0 / (px + 0.
+-005) - 1.0) if win else -1.0
++                pnl = (1.0 / (px + 0.005) - 1.0) if win else -1.0
+                 trades.append({"t": t, "win": win, "pnl": round(pnl, 3), "px": round(px, 3), "tag": w.get("tag", "?")})
+                 break
+     def agg(sub):
+@@ -354,7 +347,7 @@ def hour_stats(ws):
+ def hyps(model, rule, bins, stk, ws, hours, se):
+     H = []
+     def add(name, note, is_n, is_v, oos_n, oos_v, ok, collecting):
+-        status = " копим данные" if collecting else (" подтверждено OOS" if ok else " отвергнуто OOS")
++        status = "⏳ копим данные" if collecting else ("✅ подтверждено OOS" if ok else "❌ отвергнуто OOS")
+         H.append({"name": name, "note": note, "is_n": is_n, "is_v": is_v,
+                   "oos_n": oos_n, "oos_v": oos_v, "ok": ok, "status": status})
+     oos_n = model["oos"]["n"]
+@@ -363,8 +356,7 @@ def hyps(model, rule, bins, stk, ws, hours, se):
+           model["oos"]["brier"] is not None and model["oos"]["brier"] < 0.25 and oos_n >= MIN_OOS
+     add("Модель точнее монетки", "Brier < 0.25 на обеих половинах",
+         model["is"]["n"], model["is"]["brier"], oos_n, model["oos"]["brier"],
+-        ok1, model["oos"]["n"] < MIN_OOS or model[
+-"is"]["n"] < 30)
++        ok1, model["oos"]["n"] < MIN_OOS or model["is"]["n"] < 30)
+     # H2: модель не хуже рынка
+     mb_is = model["mkt_brier"]["is"]
+     mb_oos = model["mkt_brier"]["oos"]
+@@ -377,7 +369,7 @@ def hyps(model, rule, bins, stk, ws, hours, se):
+     # H3: правило эджа с положительным EV
+     ris, roos = rule["is"], rule["oos"]
+     ok3 = ris["ev"] is not None and ris["ev"] > 0 and roos["ev"] is not None and roos["ev"] > 0 and roos["n"] >= MIN_OOS
+-    add("Правило эдж  5% с положительным EV", "бэктест по снимкам, 1 сделка на окно",
++    add("Правило «эдж ≥ 5%» с положительным EV", "бэктест по снимкам, 1 сделка на окно",
+         ris["n"], ("EV " + str(ris["ev"]) + " R") if ris["ev"] is not None else None,
+         roos["n"], ("EV " + str(roos["ev"]) + " R") if roos["ev"] is not None else None,
+         ok3, roos["n"] < MIN_OOS)
+@@ -394,19 +386,18 @@ def hyps(model, rule, bins, stk, ws, hours, se):
+     dev = [s for s in big if (s["p_after_up"] is not None and abs(s["p_after_up"] - 0.5) >= STK_DEV) or
+                               (s["p_after_dn"] is not None and abs(s["p_after_dn"] - 0.5) >= STK_DEV)]
+     ok5 = not dev
+-    add("Стрики не дают эджа (эффективность)", "P(Up) после серии k в пределах 5010%",
+-        len(big), "ук
+-лонений: " + str(len(dev)), len(big), "уклонений: " + str(len(dev)),
++    add("Стрики не дают эджа (эффективность)", "P(Up) после серии k в пределах 50±10%",
++        len(big), "уклонений: " + str(len(dev)), len(big), "уклонений: " + str(len(dev)),
+         ok5, len(ws) < 300)
+     if not ok5 and len(ws) >= 300:
+-        H[-1]["status"] = " паттерн: стрики влияют на исход"
+-    # H6: смесь модели и рынка бьт обоих
++        H[-1]["status"] = "✨ паттерн: стрики влияют на исход"
++    # H6: смесь модели и рынка бьёт обоих
+     b_is, b_oos = model["blend"]["is"], model["blend"]["oos"]
+     vals = (b_is, b_oos, model["is"]["brier"], model["mkt_brier"]["is"], model["oos"]["brier"], model["mkt_brier"]["oos"])
+     ok6 = None not in vals and oos_n >= MIN_OOS and \
+         b_is < min(model["is"]["brier"], model["mkt_brier"]["is"]) and \
+         b_oos < min(model["oos"]["brier"], model["mkt_brier"]["oos"])
+-    add("Смесь 50/50 модели и рынка бьт обоих", "Brier смеси < min(модель, рынок) на обеих половинах",
++    add("Смесь 50/50 модели и рынка бьёт обоих", "Brier смеси < min(модель, рынок) на обеих половинах",
+         model["is"]["n"], b_is, oos_n, b_oos, ok6, oos_n < MIN_OOS)
+     # H7: время суток не влияет на исход
+     flagged_h = [x for x in hours if x["flag"]]
+@@ -417,7 +408,7 @@ def hyps(model, rule, bins, stk, ws, hours, se):
+         len(hours), "уклонений: " + str(len(flagged_h)),
+         ok7, len(ws) < 300)
+     if not ok7 and len(ws) >= 300:
+-        H[-1]["status"] = " паттерн: время суток влияет"
++        H[-1]["status"] = "✨ паттерн: время суток влияет"
+     # H8: стрик-эдж - рынок недооценивает моментум (walk-forward)
+     so = se["oos"]
+     ok8 = so["ev"] is not None and so["ev"] > 0 and so["n"] >= MIN_OOS
+@@ -430,8 +421,7 @@ def main():
+     lab = jload(SRC, {})
+     if not isinstance(lab, dict): lab = {}
+     cleanup(lab)
+-    bf = backfill(la
+-b)
++    bf = backfill(lab)
+     done = settle(lab)
+     ws = windows_sorted(lab)
+     ws_snap = [w for w in ws if w.get("snaps")]
+@@ -444,15 +434,15 @@ b)
+     se = streak_edge(ws)
+     H = hyps(model, rule, bins, stk, ws, hours, se)
+     h8 = [h for h in H if h["name"].startswith("Стрик-эдж")]
+-    h8s = h8[0]["status"] if h8 else " копим данные"
++    h8s = h8[0]["status"] if h8 else "⏳ копим данные"
+     settled = len(ws)
+     snaps = sum(len(e.get("snaps", [])) for e in lab.values())
+     span_h = round((max(w["start"] for w in ws) - min(w["start"] for w in ws)) / 3600.0, 1) if ws else 0
+-    golden = [h for h in H if h["ok"] and h["status"].startswith("")]
++    golden = [h for h in H if h["ok"] and h["status"].startswith("✅")]
+     if settled < READY_N:
+-        note = "Размечено " + str(settled) + " окон из " + str(len(lab)) + " в базе. Наджные выводы с ~" + str(READY_N) + " размеченных окон (сейчас " + str(round(100.0 * settled / READY_N)) + "% пути). Правила зафиксированы заранее - подгонки нет."
++        note = "Размечено " + str(settled) + " окон из " + str(len(lab)) + " в базе. Надёжные выводы с ~" + str(READY_N) + " размеченных окон (сейчас " + str(round(100.0 * settled / READY_N)) + "% пути). Правила зафиксированы заранее - подгонки нет."
+     else:
+-        note = "База достаточна. Подтвержднных OOS закономерностей: " + str(len(golden)) + " из " + str(len(H)) + " гипотез."
++        note = "База достаточна. Подтверждённых OOS закономерностей: " + str(len(golden)) + " из " + str(len(H)) + " гипотез."
+     out = {
+         "updated": now(),
+         "status": "ready" if settled >= READY_N else "collecting",
+@@ -473,10 +463,9 @@ b)
+     jsave(OUT, out)
+     h3 = [h for h in H if h["name"].startswith("Правило")]
+     jsave("results/strategies.json", {"updated": now(),
+-        "rule_v2": {"status": h3
+-[0]["status"] if h3 else " копим данные", "ev_oos": rule["oos"]["ev"], "n_oos": rule["oos"]["n"]},
++        "rule_v2": {"status": h3[0]["status"] if h3 else "⏳ копим данные", "ev_oos": rule["oos"]["ev"], "n_oos": rule["oos"]["n"]},
+         "golden": [g["name"] for g in golden],
+-        "patterns": [h["name"] + " | " + h["note"] for h in H if h["status"].startswith("")],
++        "patterns": [h["name"] + " | " + h["note"] for h in H if h["status"].startswith("✨")],
+         "streak_v1": {"status": h8s, "probs": se["probs"], "oos": se["oos"]}})
+     print("lab: windows %d, settled %d (+%d), snaps %d, hyps %d, golden %d" % (
+         len(lab), settled, done, snaps, len(H), len(golden)))
+diff --git a/autolab/worker.py b/autolab/worker.py
+index 87a9b55..2c0f7f3 100644
+--- a/autolab/worker.py
++++ b/autolab/worker.py
+@@ -341,9 +341,9 @@ def settle_sht(st):
+         if not pos or pos.get("kind") != "sht": continue
+         if time.time() < pos["end_ts"] + 120: continue
+         final = None
+-        if time.time() > pos["end_ts"] + 7200:
+-            final = 0.5
+-            reason = "нет данных расчёта"
++        if time.time() > pos["end_ts"] + 7 * 86400:
++            final = pos["entry"]
++            reason = "нет данных расчёта — возврат по входу"
+         else:
+             pr = None
+             try:
+@@ -371,17 +371,19 @@ def settle_sht(st):
+         if final is None: continue
+         st["positions"].pop(key)
+         payout = pos["shares"] * final
+-        win = final >= 0.5
++        breakeven = abs(final - pos["entry"]) < 1e-9
++        win = (final >= 0.5) and not breakeven
+         st["cash"] += payout * (1 - FEE / 2)
+         ret = payout / pos["usd"] - 1.0
+         st["closed"].append({"question": pos["question"], "slug": pos["slug"],
+-            "outcome": pos["outcome"], "entry": pos["entry"], "exit": 1.0 if win else 0.0,
+-            "ret_pct": round(ret * 100, 2), "strategy": pos["strategy"],
++            "outcome": pos["outcome"], "entry": pos["entry"], "exit": round(final, 4),
++            "ret_pct": round(ret * 100, 2), "strategy": pos["strategy"], "usd": pos["usd"], "shares": pos["shares"],
+             "opened": pos["opened"], "closed": now(),
+-            "reason": reason + (", выигрыш" if win else ", проигрыш")})
++            "reason": reason + (", выигрыш" if win else ("" if breakeven else ", проигрыш"))})
+         st["closed"] = st["closed"][-300:]
+         p_model = pos["fair_up"] if pos["outcome"] == "Up" else round(1.0 - pos["fair_up"], 4)
+-        st.setdefault("cal", []).append({"p": p_model, "win": 1 if win else 0, "tag": pos["strategy"]})
++        if not breakeven:
++            st.setdefault("cal", []).append({"p": p_model, "win": 1 if win else 0, "tag": pos["strategy"]})
+         st["cal"] = st["cal"][-500:]
+         st["stats"] = st.get("stats") or {}
+         st["stats"]["sht_trades"] = int(st["stats"].get("sht_trades", 0)) + 1
+diff --git a/config/__init__.py b/config/__init__.py
+index 827fe63..9a0ab46 100644
+--- a/config/__init__.py
++++ b/config/__init__.py
+@@ -69,8 +69,7 @@ class Settings(BaseSettings):
+         default="0.0.0.0",
+         description="Web server host"
+     )
+-    WEB_PORT: 
+-int = Field(
++    WEB_PORT: int = Field(
+         default=8000,
+         description="Web server port"
+     )
+@@ -146,8 +145,7 @@ int = Field(
+     )
+     
+     # Trading
+- 
+-   ENABLE_REAL_TRADING: bool = Field(
++    ENABLE_REAL_TRADING: bool = Field(
+         default=False,
+         description="Enable real trading (requires wallet configuration)"
+     )
+@@ -219,8 +217,7 @@ int = Field(
+         default=21,
+         description="Tag ID for Crypto markets"
+     )
+-    BITCOIN_TAG_
+-ID: int = Field(
++    BITCOIN_TAG_ID: int = Field(
+         default=21,
+         description="Tag ID for Bitcoin markets"
+     )
+diff --git a/results/lab.json b/results/lab.json
+index 1a8d3d2..4268ccd 100644
+--- a/results/lab.json
++++ b/results/lab.json
+@@ -1,762 +1 @@
+-{
+- "updated": "2026-11-10T12:22:34Z",
+- "status": "ready",
+- "status_note": "База достаточна. Подтвержднных OOS закономерностей: 1 из 8 гипотез.",
+- "settled_this_run": 30,
+- "backfilled": 0,
+- "base_up_rate": 0.489,
+- "data": {
+-  "windows": 3248,
+-  "settled": 2211,
+-  "snaps": 11435,
+-  "span_h": 77.5,
+-  "hist": 761
+- },
+- "model": {
+-  "n": 217,
+-  "is": {
+-   "n": 167,
+-   "brier": 0.1453,
+-   "acc": 78.4
+-  },
+-  "oos": {
+-   "n": 50,
+-   "brier": 0.1824,
+-   "acc": 62.0
+-  },
+-  "mkt_cmp": {
+-   "is": "мод 0.1453 / рынок 0.1357",
+-   "oos": "мод 0.1824 / рынок 0.2004"
+-  },
+-  "mkt_brier": {
+-   "is": 0.1357,
+-   "oos": 0.2004
+-  },
+-  "blend": {
+-   "is": 0.1369,
+-   "oos": 0.188
+-  },
+-  "per_tag": {
+-   "sht15": {
+-    "n": 84,
+-    "brier": 0.1613,
+-    "acc": 71.4
+-   },
+-   "sht5": {
+-    "n": 133,
+-    "brier": 0.1491,
+-    "acc": 76.7
+-   }
+-  }
+- },
+- "rule": {
+-  "is": {
+-   "n": 57,
+-   "winrate": 59.6,
+-   "pnl_r": 9.35,
+-   "ev": 0.164
+-  },
+-  "oos": {
+-   "n": 15,
+-   "winrate": 60.0,
+-   "pnl_r": 10.27,
+-   "ev": 0.685
+-  },
+-  "total": {
+-   "n": 72,
+-   "winrate": 59.7,
+-   "pnl_r": 19.62,
+-   "ev": 0.273
+-  },
+-  "sample": [
+-   {
+-    "t": 1794242427,
+-    "tag": "sht15",
+-    "part": "oos",
+-    "win": 0,
+-    "pnl": -1.0,
+-    "px": 0.146
+-   },
+-   {
+-    "t": 1794242427,
+-    "tag": "sht15",
+-    "part": "oos",
+-    "win": 0,
+-    "pnl": -1.0,
+-    "px": 0.14
+-   },
+-   {
+-    "t": 1794238415,
+-    "tag": "sht15",
+-    "part": "oos",
+-    "win": 1,
+-    "pnl": 0.37,
+-    "px": 0.725
+-   },
+-   {
+-    "t": 1794234958,
+-    "tag": "sht15",
+-    "part": "oos",
+-    "win": 1,
+-    "pnl": 0.439,
+-    "px": 0.69
+-   },
+-   {
+-    "t": 1794231404,
+-    "tag": "sht5",
+-    "part": "oos",
+-    "win": 0,
+-    "pnl": -1.0,
+-    "px": 0.265
+-   },
+-   {
+-    "t": 1794231404,
+-    "tag": "sht5",
+-    "part": "oos",
+-    "win": 0,
+-    "pnl": -1.0,
+-    "px": 0.485
+-   },
+-   {
+-    "t": 1794231404,
+-    "tag": "sht5",
+-    "part": "oos",
+-    "win": 0,
+-    "pnl": -1.0,
+-    "px": 0.33
+-   },
+-   {
+-    "t": 1794223013,
+-    "tag": "sht5",
+-    "part": "oos",
+-    "win": 1,
+-
+-    "pnl": 1.02,
+-    "px": 0.49
+-   },
+-   {
+-    "t": 1794223013,
+-    "tag": "sht5",
+-    "part": "oos",
+-    "win": 1,
+-    "pnl": 0.887,
+-    "px": 0.525
+-   },
+-   {
+-    "t": 1794219474,
+-    "tag": "sht5",
+-    "part": "oos",
+-    "win": 0,
+-    "pnl": -1.0,
+-    "px": 0.295
+-   },
+-   {
+-    "t": 1794219474,
+-    "tag": "sht5",
+-    "part": "oos",
+-    "win": 1,
+-    "pnl": 1.151,
+-    "px": 0.46
+-   },
+-   {
+-    "t": 1794219474,
+-    "tag": "sht5",
+-    "part": "oos",
+-    "win": 1,
+-    "pnl": 1.151,
+-    "px": 0.46
+-   }
+-  ]
+- },
+- "bins": [
+-  {
+-   "lo": 0.0,
+-   "hi": 0.05,
+-   "n": 30,
+-   "mkt": 0.013,
+-   "real": 0.0,
+-   "is_real": 0.0,
+-   "oos_real": null,
+-   "flag": false
+-  },
+-  {
+-   "lo": 0.05,
+-   "hi": 0.1,
+-   "n": 6,
+-   "mkt": 0.076,
+-   "real": 0.0,
+-   "is_real": null,
+-   "oos_real": null,
+-   "flag": false
+-  },
+-  {
+-   "lo": 0.1,
+-   "hi": 0.15,
+-   "n": 2,
+-   "mkt": 0.13,
+-   "real": 0.0,
+-   "is_real": null,
+-   "oos_real": null,
+-   "flag": false
+-  },
+-  {
+-   "lo": 0.15,
+-   "hi": 0.2,
+-   "n": 3,
+-   "mkt": 0.177,
+-   "real": 0.0,
+-   "is_real": null,
+-   "oos_real": null,
+-   "flag": false
+-  },
+-  {
+-   "lo": 0.2,
+-   "hi": 0.25,
+-   "n": 5,
+-   "mkt": 0.229,
+-   "real": 0.2,
+-   "is_real": null,
+-   "oos_real": null,
+-   "flag": false
+-  },
+-  {
+-   "lo": 0.25,
+-   "hi": 0.3,
+-   "n": 7,
+-   "mkt": 0.273,
+-   "real": 0.0,
+-   "is_real": null,
+-   "oos_real": null,
+-   "flag": false
+-  },
+-  {
+-   "lo": 0.3,
+-   "hi": 0.35,
+-   "n": 12,
+-   "mkt": 0.322,
+-   "real": 0.25,
+-   "is_real": null,
+-   "oos_real": null,
+-   "flag": false
+-  },
+-  {
+-   "lo": 0.35,
+-   "hi": 0.4,
+-   "n": 7,
+-   "mkt": 0.384,
+-   "real": 0.286,
+-   "is_real": null,
+-   "oos_real": null,
+-   "flag": false
+-  },
+-  {
+-   "lo": 0.4,
+-   "hi": 0.45,
+-   "n": 12,
+-   "mkt": 0.42,
+-   "real": 0.5,
+-   "is_real": null,
+-   "oos_real": null,
+-   "flag": false
+-  },
+-  {
+-   "lo": 0.45,
+-   "hi": 0.5,
+-   "n": 17,
+-   "mkt": 0.479,
+-   "real": 0.706,
+-   "is_real": null,
+-   "oos_real": null,
+-   "flag": false
+-  },
+-  {
+-   "lo": 0.5,
+-   "hi": 0.55,
+-   "n": 25,
+-   "mkt": 0.52,
+-   "rea
+-l": 0.64,
+-   "is_real": 0.533,
+-   "oos_real": null,
+-   "flag": false
+-  },
+-  {
+-   "lo": 0.55,
+-   "hi": 0.6,
+-   "n": 6,
+-   "mkt": 0.576,
+-   "real": 0.5,
+-   "is_real": null,
+-   "oos_real": null,
+-   "flag": false
+-  },
+-  {
+-   "lo": 0.6,
+-   "hi": 0.65,
+-   "n": 8,
+-   "mkt": 0.624,
+-   "real": 0.125,
+-   "is_real": null,
+-   "oos_real": null,
+-   "flag": false
+-  },
+-  {
+-   "lo": 0.65,
+-   "hi": 0.7,
+-   "n": 12,
+-   "mkt": 0.671,
+-   "real": 0.583,
+-   "is_real": null,
+-   "oos_real": null,
+-   "flag": false
+-  },
+-  {
+-   "lo": 0.7,
+-   "hi": 0.75,
+-   "n": 10,
+-   "mkt": 0.718,
+-   "real": 0.8,
+-   "is_real": null,
+-   "oos_real": null,
+-   "flag": false
+-  },
+-  {
+-   "lo": 0.75,
+-   "hi": 0.8,
+-   "n": 5,
+-   "mkt": 0.771,
+-   "real": 0.4,
+-   "is_real": null,
+-   "oos_real": null,
+-   "flag": false
+-  },
+-  {
+-   "lo": 0.8,
+-   "hi": 0.85,
+-   "n": 6,
+-   "mkt": 0.826,
+-   "real": 1.0,
+-   "is_real": null,
+-   "oos_real": null,
+-   "flag": false
+-  },
+-  {
+-   "lo": 0.85,
+-   "hi": 0.9,
+-   "n": 9,
+-   "mkt": 0.865,
+-   "real": 0.778,
+-   "is_real": null,
+-   "oos_real": null,
+-   "flag": false
+-  },
+-  {
+-   "lo": 0.9,
+-   "hi": 0.95,
+-   "n": 5,
+-   "mkt": 0.929,
+-   "real": 1.0,
+-   "is_real": null,
+-   "oos_real": null,
+-   "flag": false
+-  },
+-  {
+-   "lo": 0.95,
+-   "hi": 1.0,
+-   "n": 46,
+-   "mkt": 0.989,
+-   "real": 0.957,
+-   "is_real": 0.974,
+-   "oos_real": null,
+-   "flag": false
+-  }
+- ],
+- "streaks": [
+-  {
+-   "tag": "sht15",
+-   "k": 1,
+-   "n_up": 312,
+-   "p_after_up": 0.657,
+-   "n_dn": 307,
+-   "p_after_dn": 0.349
+-  },
+-  {
+-   "tag": "sht15",
+-   "k": 2,
+-   "n_up": 205,
+-   "p_after_up": 0.571,
+-   "n_dn": 199,
+-   "p_after_dn": 0.402
+-  },
+-  {
+-   "tag": "sht15",
+-   "k": 3,
+-   "n_up": 117,
+-   "p_after_up": 0.607,
+-   "n_dn": 119,
+-   "p_after_dn": 0.353
+-  },
+-  {
+-   "tag": "sht5",
+-   "k": 1,
+-   "n_up": 769,
+-   "p_after_up": 0.724,
+-   "n_dn": 821,
+-   "p_after_dn": 0.258
+-  },
+-  {
+-   "tag": "sht5",
+-   "k": 2,
+-   "n_up": 556,
+-   "p_after_up": 0.714,
+-   "n_dn": 609,
+-   "p_after_dn": 0.238
+-  },
+-  {
+-   "tag": "sht5",
+-   "k": 3,
+-   "n_up": 396,
+-
+-   "p_after_up": 0.682,
+-   "n_dn": 464,
+-   "p_after_dn": 0.248
+-  }
+- ],
+- "hours": [
+-  {
+-   "hour": 0,
+-   "n": 96,
+-   "up_rate": 0.427,
+-   "flag": false
+-  },
+-  {
+-   "hour": 1,
+-   "n": 96,
+-   "up_rate": 0.427,
+-   "flag": false
+-  },
+-  {
+-   "hour": 2,
+-   "n": 96,
+-   "up_rate": 0.5,
+-   "flag": false
+-  },
+-  {
+-   "hour": 3,
+-   "n": 96,
+-   "up_rate": 0.469,
+-   "flag": false
+-  },
+-  {
+-   "hour": 4,
+-   "n": 96,
+-   "up_rate": 0.396,
+-   "flag": false
+-  },
+-  {
+-   "hour": 5,
+-   "n": 96,
+-   "up_rate": 0.438,
+-   "flag": false
+-  },
+-  {
+-   "hour": 6,
+-   "n": 96,
+-   "up_rate": 0.427,
+-   "flag": false
+-  },
+-  {
+-   "hour": 7,
+-   "n": 96,
+-   "up_rate": 0.604,
+-   "flag": true
+-  },
+-  {
+-   "hour": 8,
+-   "n": 96,
+-   "up_rate": 0.667,
+-   "flag": true
+-  },
+-  {
+-   "hour": 9,
+-   "n": 96,
+-   "up_rate": 0.385,
+-   "flag": true
+-  },
+-  {
+-   "hour": 10,
+-   "n": 96,
+-   "up_rate": 0.531,
+-   "flag": false
+-  },
+-  {
+-   "hour": 11,
+-   "n": 96,
+-   "up_rate": 0.479,
+-   "flag": false
+-  },
+-  {
+-   "hour": 12,
+-   "n": 96,
+-   "up_rate": 0.615,
+-   "flag": true
+-  },
+-  {
+-   "hour": 13,
+-   "n": 104,
+-   "up_rate": 0.481,
+-   "flag": false
+-  },
+-  {
+-   "hour": 14,
+-   "n": 104,
+-   "up_rate": 0.606,
+-   "flag": true
+-  },
+-  {
+-   "hour": 15,
+-   "n": 104,
+-   "up_rate": 0.577,
+-   "flag": false
+-  },
+-  {
+-   "hour": 16,
+-   "n": 104,
+-   "up_rate": 0.413,
+-   "flag": false
+-  },
+-  {
+-   "hour": 17,
+-   "n": 104,
+-   "up_rate": 0.385,
+-   "flag": true
+-  },
+-  {
+-   "hour": 18,
+-   "n": 83,
+-   "up_rate": 0.578,
+-   "flag": false
+-  },
+-  {
+-   "hour": 19,
+-   "n": 60,
+-   "up_rate": 0.5,
+-   "flag": false
+-  },
+-  {
+-   "hour": 20,
+-   "n": 60,
+-   "up_rate": 0.267,
+-   "flag": true
+-  },
+-  {
+-   "hour": 21,
+-   "n": 60,
+-   "up_rate": 0.433,
+-   "flag": false
+-  },
+-  {
+-   "hour": 22,
+-   "n": 84,
+-   "up_rate": 0.524,
+-   "flag": false
+-  },
+-  {
+-   "hour": 23,
+-   "n": 96,
+-   "up_rate": 0.531,
+-   "flag": false
+-  }
+- ],
+- "streak_edge": {
+-  "probs": {
+-   "after_up": 0.527,
+-   "after_down": 0.468
+-  },
+-  "n_est": {
+-   "up": 740,
+-   "down": 802
+-  },
+-  "oos": {
+-   "n": 20,
+-   
+-"winrate": 45.0,
+-   "ev": 0.432
+-  },
+-  "trades": [
+-   {
+-    "t": 1794215900,
+-    "win": 1,
+-    "pnl": 1.941,
+-    "px": 0.335,
+-    "tag": "sht15"
+-   },
+-   {
+-    "t": 1794215900,
+-    "win": 1,
+-    "pnl": 6.143,
+-    "px": 0.135,
+-    "tag": "sht5"
+-   },
+-   {
+-    "t": 1794223013,
+-    "win": 0,
+-    "pnl": -1.0,
+-    "px": 0.455,
+-    "tag": "sht5"
+-   },
+-   {
+-    "t": 1794223013,
+-    "win": 0,
+-    "pnl": -1.0,
+-    "px": 0.475,
+-    "tag": "sht5"
+-   },
+-   {
+-    "t": 1794231404,
+-    "win": 0,
+-    "pnl": -1.0,
+-    "px": 0.275,
+-    "tag": "sht15"
+-   },
+-   {
+-    "t": 1794231404,
+-    "win": 0,
+-    "pnl": -1.0,
+-    "px": 0.435,
+-    "tag": "sht15"
+-   },
+-   {
+-    "t": 1794238415,
+-    "win": 0,
+-    "pnl": -1.0,
+-    "px": 0.325,
+-    "tag": "sht15"
+-   },
+-   {
+-    "t": 1794238415,
+-    "win": 0,
+-    "pnl": -1.0,
+-    "px": 0.275,
+-    "tag": "sht15"
+-   },
+-   {
+-    "t": 1794242427,
+-    "win": 0,
+-    "pnl": -1.0,
+-    "px": 0.146,
+-    "tag": "sht15"
+-   },
+-   {
+-    "t": 1794242427,
+-    "win": 0,
+-    "pnl": -1.0,
+-    "px": 0.14,
+-    "tag": "sht15"
+-   },
+-   {
+-    "t": 1794245922,
+-    "win": 0,
+-    "pnl": -1.0,
+-    "px": 0.265,
+-    "tag": "sht15"
+-   },
+-   {
+-    "t": 1794245922,
+-    "win": 0,
+-    "pnl": -1.0,
+-    "px": 0.325,
+-    "tag": "sht15"
+-   }
+-  ]
+- },
+- "hyp": [
+-  {
+-   "name": "Модель точнее монетки",
+-   "note": "Brier < 0.25 на обеих половинах",
+-   "is_n": 167,
+-   "is_v": 0.1453,
+-   "oos_n": 50,
+-   "oos_v": 0.1824,
+-   "ok": true,
+-   "status": " подтверждено OOS"
+-  },
+-  {
+-   "name": "Модель конкурирует с рынком",
+-   "note": "Brier модель vs рынок (тот же снимок)",
+-   "is_n": 167,
+-   "is_v": "мод 0.1453 / рынок 0.1357",
+-   "oos_n": 50,
+-   "oos_v": "мод 0.1824 / рынок 0.2004",
+-   "ok": false,
+-   "status": " отвергнуто OOS"
+-  },
+-  {
+-   "name": "Правило эдж  5% с положительным EV",
+-   "note": "бэктест по снимкам, 1 сделка на окно",
+-   "is_n": 57,
+-   "is_v": "EV 0.164 R",
+-   "oos_n": 15,
+-   "oos_v": "EV 0.685 R",
+-   "ok": false,
+-   "status": " копим данные"
+-  },
+-  {
+-   "name": "Есть бин рынка 
+-с системной ошибкой",
+-   "note": "сдвиг >= 5пп на IS и OOS",
+-   "is_n": 20,
+-   "is_v": "флагов: 0",
+-   "oos_n": 0,
+-   "oos_v": "бинов с флагом: 0",
+-   "ok": false,
+-   "status": " отвергнуто OOS"
+-  },
+-  {
+-   "name": "Стрики не дают эджа (эффективность)",
+-   "note": "P(Up) после серии k в пределах 5010%",
+-   "is_n": 6,
+-   "is_v": "уклонений: 5",
+-   "oos_n": 6,
+-   "oos_v": "уклонений: 5",
+-   "ok": false,
+-   "status": " паттерн: стрики влияют на исход"
+-  },
+-  {
+-   "name": "Смесь 50/50 модели и рынка бьт обоих",
+-   "note": "Brier смеси < min(модель, рынок) на обеих половинах",
+-   "is_n": 167,
+-   "is_v": 0.1369,
+-   "oos_n": 50,
+-   "oos_v": 0.188,
+-   "ok": false,
+-   "status": " отвергнуто OOS"
+-  },
+-  {
+-   "name": "Время суток не влияет на исход Up/Down",
+-   "note": "уклонения >= 10пп от базы при n >= 50 в часе: 7:00 UTC, 8:00 UTC, 9:00 UTC",
+-   "is_n": 24,
+-   "is_v": "уклонений: 7",
+-   "oos_n": 24,
+-   "oos_v": "уклонений: 7",
+-   "ok": false,
+-   "status": " паттерн: время суток влияет"
+-  },
+-  {
+-   "name": "Стрик-эдж: рынок недооценивает моментум",
+-   "note": "вероятности из старых 70% данных, сделки только на новых 30%; P(Up|после Up)=0.527, P(Up|после Down)=0.468",
+-   "is_n": 1542,
+-   "is_v": "P(up|up)=0.527",
+-   "oos_n": 20,
+-   "oos_v": 0.432,
+-   "ok": false,
+-   "status": " копим данные"
+-  }
+- ],
+- "golden": [
+-  {
+-   "name": "Модель точнее монетки",
+-   "note": "Brier < 0.25 на обеих половинах"
+-  }
+- ]
+-}
+\ No newline at end of file
++{ "updated": "2026-11-10T12:22:34Z", "status": "ready", "status_note": "База достаточна. Подтвержднных OOS закономерностей: 1 из 8 гипотез.", "settled_this_run": 30, "backfilled": 0, "base_up_rate": 0.489, "data": {  "windows": 3248,  "settled": 2211,  "snaps": 11435,  "span_h": 77.5,  "hist": 761 }, "model": {  "n": 217,  "is": {   "n": 167,   "brier": 0.1453,   "acc": 78.4  },  "oos": {   "n": 50,   "brier": 0.1824,   "acc": 62.0  },  "mkt_cmp": {   "is": "мод 0.1453 / рынок 0.1357",   "oos": "мод 0.1824 / рынок 0.2004"  },  "mkt_brier": {   "is": 0.1357,   "oos": 0.2004  },  "blend": {   "is": 0.1369,   "oos": 0.188  },  "per_tag": {   "sht15": {    "n": 84,    "brier": 0.1613,    "acc": 71.4   },   "sht5": {    "n": 133,    "brier": 0.1491,    "acc": 76.7   }  } }, "rule": {  "is": {   "n": 57,   "winrate": 59.6,   "pnl_r": 9.35,   "ev": 0.164  },  "oos": {   "n": 15,   "winrate": 60.0,   "pnl_r": 10.27,   "ev": 0.685  },  "total": {   "n": 72,   "winrate": 59.7,   "pnl_r": 19.62,   "ev": 0.273  },  "sample": [   {    "t": 1794242427,    "tag": "sht15",    "part": "oos",    "win": 0,    "pnl": -1.0,    "px": 0.146   },   {    "t": 1794242427,    "tag": "sht15",    "part": "oos",    "win": 0,    "pnl": -1.0,    "px": 0.14   },   {    "t": 1794238415,    "tag": "sht15",    "part": "oos",    "win": 1,    "pnl": 0.37,    "px": 0.725   },   {    "t": 1794234958,    "tag": "sht15",    "part": "oos",    "win": 1,    "pnl": 0.439,    "px": 0.69   },   {    "t": 1794231404,    "tag": "sht5",    "part": "oos",    "win": 0,    "pnl": -1.0,    "px": 0.265   },   {    "t": 1794231404,    "tag": "sht5",    "part": "oos",    "win": 0,    "pnl": -1.0,    "px": 0.485   },   {    "t": 1794231404,    "tag": "sht5",    "part": "oos",    "win": 0,    "pnl": -1.0,    "px": 0.33   },   {    "t": 1794223013,    "tag": "sht5",    "part": "oos",    "win": 1,    "pnl": 1.02,    "px": 0.49   },   {    "t": 1794223013,    "tag": "sht5",    "part": "oos",    "win": 1,    "pnl": 0.887,    "px": 0.525   },   {    "t": 1794219474,    "tag": "sht5",    "part": "oos",    "win": 0,    "pnl": -1.0,    "px": 0.295   },   {    "t": 1794219474,    "tag": "sht5",    "part": "oos",    "win": 1,    "pnl": 1.151,    "px": 0.46   },   {    "t": 1794219474,    "tag": "sht5",    "part": "oos",    "win": 1,    "pnl": 1.151,    "px": 0.46   }  ] }, "bins": [  {   "lo": 0.0,   "hi": 0.05,   "n": 30,   "mkt": 0.013,   "real": 0.0,   "is_real": 0.0,   "oos_real": null,   "flag": false  },  {   "lo": 0.05,   "hi": 0.1,   "n": 6,   "mkt": 0.076,   "real": 0.0,   "is_real": null,   "oos_real": null,   "flag": false  },  {   "lo": 0.1,   "hi": 0.15,   "n": 2,   "mkt": 0.13,   "real": 0.0,   "is_real": null,   "oos_real": null,   "flag": false  },  {   "lo": 0.15,   "hi": 0.2,   "n": 3,   "mkt": 0.177,   "real": 0.0,   "is_real": null,   "oos_real": null,   "flag": false  },  {   "lo": 0.2,   "hi": 0.25,   "n": 5,   "mkt": 0.229,   "real": 0.2,   "is_real": null,   "oos_real": null,   "flag": false  },  {   "lo": 0.25,   "hi": 0.3,   "n": 7,   "mkt": 0.273,   "real": 0.0,   "is_real": null,   "oos_real": null,   "flag": false  },  {   "lo": 0.3,   "hi": 0.35,   "n": 12,   "mkt": 0.322,   "real": 0.25,   "is_real": null,   "oos_real": null,   "flag": false  },  {   "lo": 0.35,   "hi": 0.4,   "n": 7,   "mkt": 0.384,   "real": 0.286,   "is_real": null,   "oos_real": null,   "flag": false  },  {   "lo": 0.4,   "hi": 0.45,   "n": 12,   "mkt": 0.42,   "real": 0.5,   "is_real": null,   "oos_real": null,   "flag": false  },  {   "lo": 0.45,   "hi": 0.5,   "n": 17,   "mkt": 0.479,   "real": 0.706,   "is_real": null,   "oos_real": null,   "flag": false  },  {   "lo": 0.5,   "hi": 0.55,   "n": 25,   "mkt": 0.52,   "real": 0.64,   "is_real": 0.533,   "oos_real": null,   "flag": false  },  {   "lo": 0.55,   "hi": 0.6,   "n": 6,   "mkt": 0.576,   "real": 0.5,   "is_real": null,   "oos_real": null,   "flag": false  },  {   "lo": 0.6,   "hi": 0.65,   "n": 8,   "mkt": 0.624,   "real": 0.125,   "is_real": null,   "oos_real": null,   "flag": false  },  {   "lo": 0.65,   "hi": 0.7,   "n": 12,   "mkt": 0.671,   "real": 0.583,   "is_real": null,   "oos_real": null,   "flag": false  },  {   "lo": 0.7,   "hi": 0.75,   "n": 10,   "mkt": 0.718,   "real": 0.8,   "is_real": null,   "oos_real": null,   "flag": false  },  {   "lo": 0.75,   "hi": 0.8,   "n": 5,   "mkt": 0.771,   "real": 0.4,   "is_real": null,   "oos_real": null,   "flag": false  },  {   "lo": 0.8,   "hi": 0.85,   "n": 6,   "mkt": 0.826,   "real": 1.0,   "is_real": null,   "oos_real": null,   "flag": false  },  {   "lo": 0.85,   "hi": 0.9,   "n": 9,   "mkt": 0.865,   "real": 0.778,   "is_real": null,   "oos_real": null,   "flag": false  },  {   "lo": 0.9,   "hi": 0.95,   "n": 5,   "mkt": 0.929,   "real": 1.0,   "is_real": null,   "oos_real": null,   "flag": false  },  {   "lo": 0.95,   "hi": 1.0,   "n": 46,   "mkt": 0.989,   "real": 0.957,   "is_real": 0.974,   "oos_real": null,   "flag": false  } ], "streaks": [  {   "tag": "sht15",   "k": 1,   "n_up": 312,   "p_after_up": 0.657,   "n_dn": 307,   "p_after_dn": 0.349  },  {   "tag": "sht15",   "k": 2,   "n_up": 205,   "p_after_up": 0.571,   "n_dn": 199,   "p_after_dn": 0.402  },  {   "tag": "sht15",   "k": 3,   "n_up": 117,   "p_after_up": 0.607,   "n_dn": 119,   "p_after_dn": 0.353  },  {   "tag": "sht5",   "k": 1,   "n_up": 769,   "p_after_up": 0.724,   "n_dn": 821,   "p_after_dn": 0.258  },  {   "tag": "sht5",   "k": 2,   "n_up": 556,   "p_after_up": 0.714,   "n_dn": 609,   "p_after_dn": 0.238  },  {   "tag": "sht5",   "k": 3,   "n_up": 396,   "p_after_up": 0.682,   "n_dn": 464,   "p_after_dn": 0.248  } ], "hours": [  {   "hour": 0,   "n": 96,   "up_rate": 0.427,   "flag": false  },  {   "hour": 1,   "n": 96,   "up_rate": 0.427,   "flag": false  },  {   "hour": 2,   "n": 96,   "up_rate": 0.5,   "flag": false  },  {   "hour": 3,   "n": 96,   "up_rate": 0.469,   "flag": false  },  {   "hour": 4,   "n": 96,   "up_rate": 0.396,   "flag": false  },  {   "hour": 5,   "n": 96,   "up_rate": 0.438,   "flag": false  },  {   "hour": 6,   "n": 96,   "up_rate": 0.427,   "flag": false  },  {   "hour": 7,   "n": 96,   "up_rate": 0.604,   "flag": true  },  {   "hour": 8,   "n": 96,   "up_rate": 0.667,   "flag": true  },  {   "hour": 9,   "n": 96,   "up_rate": 0.385,   "flag": true  },  {   "hour": 10,   "n": 96,   "up_rate": 0.531,   "flag": false  },  {   "hour": 11,   "n": 96,   "up_rate": 0.479,   "flag": false  },  {   "hour": 12,   "n": 96,   "up_rate": 0.615,   "flag": true  },  {   "hour": 13,   "n": 104,   "up_rate": 0.481,   "flag": false  },  {   "hour": 14,   "n": 104,   "up_rate": 0.606,   "flag": true  },  {   "hour": 15,   "n": 104,   "up_rate": 0.577,   "flag": false  },  {   "hour": 16,   "n": 104,   "up_rate": 0.413,   "flag": false  },  {   "hour": 17,   "n": 104,   "up_rate": 0.385,   "flag": true  },  {   "hour": 18,   "n": 83,   "up_rate": 0.578,   "flag": false  },  {   "hour": 19,   "n": 60,   "up_rate": 0.5,   "flag": false  },  {   "hour": 20,   "n": 60,   "up_rate": 0.267,   "flag": true  },  {   "hour": 21,   "n": 60,   "up_rate": 0.433,   "flag": false  },  {   "hour": 22,   "n": 84,   "up_rate": 0.524,   "flag": false  },  {   "hour": 23,   "n": 96,   "up_rate": 0.531,   "flag": false  } ], "streak_edge": {  "probs": {   "after_up": 0.527,   "after_down": 0.468  },  "n_est": {   "up": 740,   "down": 802  },  "oos": {   "n": 20,   "winrate": 45.0,   "ev": 0.432  },  "trades": [   {    "t": 1794215900,    "win": 1,    "pnl": 1.941,    "px": 0.335,    "tag": "sht15"   },   {    "t": 1794215900,    "win": 1,    "pnl": 6.143,    "px": 0.135,    "tag": "sht5"   },   {    "t": 1794223013,    "win": 0,    "pnl": -1.0,    "px": 0.455,    "tag": "sht5"   },   {    "t": 1794223013,    "win": 0,    "pnl": -1.0,    "px": 0.475,    "tag": "sht5"   },   {    "t": 1794231404,    "win": 0,    "pnl": -1.0,    "px": 0.275,    "tag": "sht15"   },   {    "t": 1794231404,    "win": 0,    "pnl": -1.0,    "px": 0.435,    "tag": "sht15"   },   {    "t": 1794238415,    "win": 0,    "pnl": -1.0,    "px": 0.325,    "tag": "sht15"   },   {    "t": 1794238415,    "win": 0,    "pnl": -1.0,    "px": 0.275,    "tag": "sht15"   },   {    "t": 1794242427,    "win": 0,    "pnl": -1.0,    "px": 0.146,    "tag": "sht15"   },   {    "t": 1794242427,    "win": 0,    "pnl": -1.0,    "px": 0.14,    "tag": "sht15"   },   {    "t": 1794245922,    "win": 0,    "pnl": -1.0,    "px": 0.265,    "tag": "sht15"   },   {    "t": 1794245922,    "win": 0,    "pnl": -1.0,    "px": 0.325,    "tag": "sht15"   }  ] }, "hyp": [  {   "name": "Модель точнее монетки",   "note": "Brier < 0.25 на обеих половинах",   "is_n": 167,   "is_v": 0.1453,   "oos_n": 50,   "oos_v": 0.1824,   "ok": true,   "status": " подтверждено OOS"  },  {   "name": "Модель конкурирует с рынком",   "note": "Brier модель vs рынок (тот же снимок)",   "is_n": 167,   "is_v": "мод 0.1453 / рынок 0.1357",   "oos_n": 50,   "oos_v": "мод 0.1824 / рынок 0.2004",   "ok": false,   "status": " отвергнуто OOS"  },  {   "name": "Правило эдж  5% с положительным EV",   "note": "бэктест по снимкам, 1 сделка на окно",   "is_n": 57,   "is_v": "EV 0.164 R",   "oos_n": 15,   "oos_v": "EV 0.685 R",   "ok": false,   "status": " копим данные"  },  {   "name": "Есть бин рынка с системной ошибкой",   "note": "сдвиг >= 5пп на IS и OOS",   "is_n": 20,   "is_v": "флагов: 0",   "oos_n": 0,   "oos_v": "бинов с флагом: 0",   "ok": false,   "status": " отвергнуто OOS"  },  {   "name": "Стрики не дают эджа (эффективность)",   "note": "P(Up) после серии k в пределах 5010%",   "is_n": 6,   "is_v": "уклонений: 5",   "oos_n": 6,   "oos_v": "уклонений: 5",   "ok": false,   "status": " паттерн: стрики влияют на исход"  },  {   "name": "Смесь 50/50 модели и рынка бьт обоих",   "note": "Brier смеси < min(модель, рынок) на обеих половинах",   "is_n": 167,   "is_v": 0.1369,   "oos_n": 50,   "oos_v": 0.188,   "ok": false,   "status": " отвергнуто OOS"  },  {   "name": "Время суток не влияет на исход Up/Down",   "note": "уклонения >= 10пп от базы при n >= 50 в часе: 7:00 UTC, 8:00 UTC, 9:00 UTC",   "is_n": 24,   "is_v": "уклонений: 7",   "oos_n": 24,   "oos_v": "уклонений: 7",   "ok": false,   "status": " паттерн: время суток влияет"  },  {   "name": "Стрик-эдж: рынок недооценивает моментум",   "note": "вероятности из старых 70% данных, сделки только на новых 30%; P(Up|после Up)=0.527, P(Up|после Down)=0.468",   "is_n": 1542,   "is_v": "P(up|up)=0.527",   "oos_n": 20,   "oos_v": 0.432,   "ok": false,   "status": " копим данные"  } ], "golden": [  {   "name": "Модель точнее монетки",   "note": "Brier < 0.25 на обеих половинах"  } ]}
+\ No newline at end of file
+diff --git a/results/scan.json b/results/scan.json
+index 0733ffe..1146999 100644
+--- a/results/scan.json
++++ b/results/scan.json
+@@ -1,5 +1,5 @@
+ {
+- "updated": "2026-11-21T00:09:05Z",
++ "updated": "2026-11-21T03:03:02Z",
+  "scanned": 200,
+- "runs": 28
++ "runs": 29
+ }
+\ No newline at end of file
+diff --git a/results/sht.json b/results/sht.json
+index b8e3e35..a6420c0 100644
+--- a/results/sht.json
++++ b/results/sht.json
+@@ -1,132 +1,146 @@
+ {
+- "updated": "2026-11-21T00:09:05Z",
++ "updated": "2026-11-21T03:03:02Z",
+  "live": [
+   {
+    "series": "btc-updown-5m",
+    "tag": "sht5",
+-   "slug": "btc-updown-5m-1795219500",
+-   "title": "Bitcoin Up or Down - November 20, 7:05PM-7:10PM ET",
++   "slug": "btc-updown-5m-1795230000",
++   "title": "Bitcoin Up or Down - November 20, 10:00PM-10:05PM ET",
+    "sym": "BTCUSDT",
+    "win_s": 300,
+-   "start": 1795219500,
+-   "end": 1795219800,
+-   "p_up": 0.475,
+-   "p_down": 0.525,
+-   "liq": 13252,
++   "start": 1795230000,
++   "end": 1795230300,
++   "p_up": 0.2,
++   "p_down": 0.8,
++   "liq": 12916,
+    "accepting": true,
+-   "fair_up": 0.7766,
+-   "edge_up": 0.3016,
+-   "edge_down": -0.3016,
+-   "tau_s": 66
++   "fair_up": 0.1908,
++   "edge_up": -0.0092,
++   "edge_down": 0.0092,
++   "tau_s": 127
+   },
+   {
+    "series": "eth-updown-5m",
+    "tag": "sht5",
+-   "slug": "eth-updown-5m-1795219500",
+-   "title": "Ethereum Up or Down - November 20, 7:05PM-7:10PM ET",
++   "slug": "eth-updown-5m-1795230000",
++   "title": "Ethereum Up or Down - November 20, 10:00PM-10:05PM ET",
+    "sym": "ETHUSDT",
+    "win_s": 300,
+-   "start": 1795219500,
+-   "end": 1795219800,
+-   "p_up": 0.415,
+-   "p_down": 0.585,
+-   "liq": 3638,
++   "start": 1795230000,
++   "end": 1795230300,
++   "p_up": 0.37,
++   "p_down": 0.63,
++   "liq": 6838,
+    "accepting": true,
+-   "fair_up": 0.7707,
+-   "edge_up": 0.3557,
+-   "edge_down": -0.3557,
+-   "tau_s": 62
++   "fair_up": 0.3116,
++   "edge_up": -0.0584,
++   "edge_down": 0.0584,
++   "tau_s": 122
+   },
+   {
+    "series": "sol-updown-5m",
+    "tag": "sht5",
+-   "slug": "sol-updown-5m-1795219500",
+-   "title": "Solana Up or Down - November 20, 7:05PM-7:10PM ET",
++   "slug": "sol-updown-5m-1795230000",
++   "title": "Solana Up or Down - November 20, 10:00PM-10:05PM ET",
+    "sym": "SOLUSDT",
+    "win_s": 300,
+-   "start": 1795219500,
+-   "end": 1795219800,
+-   "p_up": 0.565,
+-   "p_down": 0.435,
+-   "liq": 3654,
++   "start": 1795230000,
++   "end": 1795230300,
++   "p_up": 0.095,
++   "p_down": 0.905,
++   "liq": 4680,
+    "accepting": true,
+-   "fair_up": 0.7202,
+-   "edge_up": 0.1552,
+-   "edge_down": -0.1552,
+-   "tau_s": 59
++   "fair_up": 0.1228,
++   "edge_up": 0.0278,
++   "edge_down": -0.0278,
++   "tau_s": 118
+   },
+   {
+    "series": "btc-updown-15m",
+    "tag": "sht15",
+-   "slug": "btc-updown-15m-1795219200",
+-   "title": "Bitcoin Up or Down - November 20, 7:00PM-7:15PM ET",
++   "slug": "btc-updown-15m-1795230000",
++   "title": "Bitcoin Up or Down - November 20, 10:00PM-10:15PM ET",
+    "sym": "BTCUSDT",
+    "win_s": 900,
+-   "start": 1795219200,
+-   "end": 1795220100,
+-   "p_up": 0.47,
+-   "p_down": 0.53,
+-   "liq": 9202,
++   "start": 1795230000,
++   "end": 1795230900,
++   "p_up": 0.465,
++   "p_down": 0.535,
++   "liq": 9695,
+    "accepting": true,
+-   "fair_up": 0.5613,
+-   "edge_up": 0.0913,
+-   "edge_down": -0.0913,
+-   "tau_s": 364
++   "fair_up": 0.3569,
++   "edge_up": -0.1081,
++   "edge_down": 0.1081,
++   "tau_s": 725
+   },
+   {
+    "series": "eth-updown-15m",
+    "tag": "sht15",
+-   "slug": "eth-updown-15m-1795219200",
+-   "title": "Ethereum Up or Down - November 20, 7:00PM-7:15PM ET",
++   "slug": "eth-updown-15m-1795230000",
++   "title": "Ethereum Up or Down - November 20, 10:00PM-10:15PM ET",
+    "sym": "ETHUSDT",
+    "win_s": 900,
+-   "start": 1795219200,
+-   "end": 1795220100,
+-   "p_up": 0.635,
+-   "p_down": 0.365,
+-   "liq": 3033,
++   "start": 1795230000,
++   "end": 1795230900,
++   "p_up": 0.4,
++   "p_down": 0.6,
++   "liq": 6256,
+    "accepting": true,
+-   "fair_up": 0.6477,
+-   "edge_up": 0.0127,
+-   "edge_down": -0.0127,
+-   "tau_s": 360
++   "fair_up": 0.4199,
++   "edge_up": 0.0199,
++   "edge_down": -0.0199,
++   "tau_s": 720
+   },
+   {
+    "series": "btc-updown-1h",
+    "tag": "sht1h",
+-   "slug": "btc-updown-1h-1795219200",
+-   "title": "Bitcoin Up or Down - November 20, 7:00PM-8:00PM ET",
++   "slug": "btc-updown-1h-1795230000",
++   "title": "Bitcoin Up or Down - November 20, 10:00PM-11:00PM ET",
+    "sym": "BTCUSDT",
+    "win_s": 3600,
+-   "start": 1795219200,
+-   "end": 1795222800,
+-   "p_up": 0.49,
+-   "p_down": 0.51,
+-   "liq": 2489,
++   "start": 1795230000,
++   "end": 1795233600,
++   "p_up": 0.525,
++   "p_down": 0.475,
++   "liq": 6137,
+    "accepting": true,
+-   "fair_up": 0.5212,
+-   "edge_up": 0.0312,
+-   "edge_down": -0.0312,
+-   "tau_s": 3063
++   "fair_up": 0.433,
++   "edge_up": -0.092,
++   "edge_down": 0.092,
++   "tau_s": 3423
+   }
+  ],
+  "cal": {
+-  "n": 34,
+-  "brier": 0.1327,
+-  "acc": 100.0
++  "n": 35,
++  "brier": 0.3883,
++  "acc": 51.4
+  },
+  "settled": [
++  {
++   "question": "Bitcoin Up or Down - November 20, 7:00PM-7:15PM ET",
++   "slug": "btc-updown-15m-1795219200",
++   "outcome": "Up",
++   "entry": 0.475,
++   "exit": 1.0,
++   "ret_pct": 110.53,
++   "strategy": "sht15",
++   "usd": 303.27,
++   "shares": 638.46,
++   "opened": "2026-11-21T00:09:01Z",
++   "closed": "2026-11-21T03:02:48Z",
++   "reason": "расчёт рынка, выигрыш"
++  },
+   {
+    "question": "Bitcoin Up or Down - November 20, 1:00PM-2:00PM ET",
+    "slug": "btc-updown-1h-1795197600",
+    "outcome": "Down",
+    "entry": 0.545,
+-   "exit": 1.0,
+-   "ret_pct": -8.26,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht1h",
+    "opened": "2026-11-20T18:30:48Z",
+    "closed": "2026-11-21T00:08:49Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Ethereum Up or Down - November 19, 9:00PM-9:15PM ET",
+@@ -134,59 +148,59 @@
+    "outcome": "Down",
+    "entry": 0.62,
+    "exit": 1.0,
+-   "ret_pct": -19.35,
++   "ret_pct": 61.13,
+    "strategy": "sht15",
+    "opened": "2026-11-20T02:10:30Z",
+    "closed": "2026-11-20T10:00:09Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Bitcoin Up or Down - November 19, 9:00PM-9:15PM ET",
+    "slug": "btc-updown-15m-1795140000",
+    "outcome": "Down",
+    "entry": 0.455,
+-   "exit": 1.0,
+-   "ret_pct": 9.89,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht15",
+    "opened": "2026-11-20T02:10:30Z",
+    "closed": "2026-11-20T10:00:09Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Solana Up or Down - November 19, 3:55PM-4:00PM ET",
+    "slug": "sol-updown-5m-1795121700",
+    "outcome": "Down",
+    "entry": 0.51,
+-   "exit": 1.0,
+-   "ret_pct": -1.96,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht5",
+    "opened": "2026-11-19T20:58:21Z",
+    "closed": "2026-11-20T02:10:24Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Ethereum Up or Down - November 19, 3:45PM-4:00PM ET",
+    "slug": "eth-updown-15m-1795121100",
+    "outcome": "Down",
+    "entry": 0.445,
+-   "exit": 1.0,
+-   "ret_pct": 12.36,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht15",
+    "opened": "2026-11-19T20:58:21Z",
+    "closed": "2026-11-20T02:10:24Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Ethereum Up or Down - November 19, 3:55PM-4:00PM ET",
+    "slug": "eth-updown-5m-1795121700",
+    "outcome": "Down",
+    "entry": 0.73,
+-   "exit": 1.0,
+-   "ret_pct": -31.51,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht5",
+    "opened": "2026-11-19T20:58:21Z",
+    "closed": "2026-11-20T02:10:24Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Solana Up or Down - November 19, 7:35AM-7:40AM ET",
+@@ -194,23 +208,23 @@
+    "outcome": "Up",
+    "entry": 0.36,
+    "exit": 1.0,
+-   "ret_pct": 38.89,
++   "ret_pct": 177.5,
+    "strategy": "sht5",
+    "opened": "2026-11-19T12:38:26Z",
+    "closed": "2026-11-19T20:58:04Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Ethereum Up or Down - November 19, 7:30AM-7:45AM ET",
+    "slug": "eth-updown-15m-1795091400",
+    "outcome": "Up",
+    "entry": 0.47,
+-   "exit": 1.0,
+-   "ret_pct": 6.38,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht15",
+    "opened": "2026-11-19T12:38:26Z",
+    "closed": "2026-11-19T20:58:04Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Ethereum Up or Down - November 19, 7:35AM-7:40AM ET",
+@@ -218,11 +232,11 @@
+    "outcome": "Up",
+    "entry": 0.27,
+    "exit": 1.0,
+-   "ret_pct": 85.19,
++   "ret_pct": 270.0,
+    "strategy": "sht5",
+    "opened": "2026-11-19T12:38:26Z",
+    "closed": "2026-11-19T20:58:04Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Bitcoin Up or Down - November 19, 7:35AM-7:40AM ET",
+@@ -230,11 +244,11 @@
+    "outcome": "Up",
+    "entry": 0.46,
+    "exit": 1.0,
+-   "ret_pct": 8.7,
++   "ret_pct": 117.17,
+    "strategy": "sht5",
+    "opened": "2026-11-19T12:38:26Z",
+    "closed": "2026-11-19T20:58:04Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Ethereum Up or Down - November 18, 10:55PM-11:00PM ET",
+@@ -242,23 +256,11 @@
+    "outcome": "Up",
+    "entry": 0.73,
+    "exit": 1.0,
+-   "ret_pct": -31.51,
++   "ret_pct": 36.85,
+    "strategy": "sht5",
+    "opened": "2026-11-19T03:57:28Z",
+    "closed": "2026-11-19T12:38:12Z",
+-   "reason": "нет данных расчёта, выигрыш"
+-  },
+-  {
+-   "question": "Bitcoin Up or Down - November 18, 10:45PM-11:00PM ET",
+-   "slug": "btc-updown-15m-1795059900",
+-   "outcome": "Up",
+-   "entry": 0.82,
+-   "exit": 1.0,
+-   "ret_pct": -39.02,
+-   "strategy": "sht15",
+-   "opened": "2026-11-19T03:57:28Z",
+-   "closed": "2026-11-19T12:38:12Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   }
+  ]
+ }
+\ No newline at end of file
+diff --git a/results/sht_errors.json b/results/sht_errors.json
+index 648480b..c4d8646 100644
+--- a/results/sht_errors.json
++++ b/results/sht_errors.json
+@@ -1,6 +1,6 @@
+ {
+- "updated": "2026-11-21T00:08:52Z",
+- "probed": 9,
+- "found": 9,
++ "updated": "2026-11-21T03:02:50Z",
++ "probed": 6,
++ "found": 6,
+  "errors": {}
+ }
+\ No newline at end of file
+diff --git a/results/sht_lab.json b/results/sht_lab.json
+index 32bca50..b2c27c9 100644
+--- a/results/sht_lab.json
++++ b/results/sht_lab.json
+@@ -2072,5 +2072,107 @@
+    ]
+   ],
+   "outcome": null
++ },
++ "btc-updown-5m-1795230000": {
++  "series": "btc-updown-5m",
++  "tag": "sht5",
++  "sym": "BTCUSDT",
++  "win_s": 300,
++  "start": 1795230000,
++  "end": 1795230300,
++  "snaps": [
++   [
++    1795230181,
++    0.2,
++    0.1908,
++    12916
++   ]
++  ],
++  "outcome": null
++ },
++ "btc-updown-15m-1795230000": {
++  "series": "btc-updown-15m",
++  "tag": "sht15",
++  "sym": "BTCUSDT",
++  "win_s": 900,
++  "start": 1795230000,
++  "end": 1795230900,
++  "snaps": [
++   [
++    1795230181,
++    0.465,
++    0.3569,
++    9695
++   ]
++  ],
++  "outcome": null
++ },
++ "btc-updown-1h-1795230000": {
++  "series": "btc-updown-1h",
++  "tag": "sht1h",
++  "sym": "BTCUSDT",
++  "win_s": 3600,
++  "start": 1795230000,
++  "end": 1795233600,
++  "snaps": [
++   [
++    1795230181,
++    0.525,
++    0.433,
++    6137
++   ]
++  ],
++  "outcome": null
++ },
++ "eth-updown-5m-1795230000": {
++  "series": "eth-updown-5m",
++  "tag": "sht5",
++  "sym": "ETHUSDT",
++  "win_s": 300,
++  "start": 1795230000,
++  "end": 1795230300,
++  "snaps": [
++   [
++    1795230181,
++    0.37,
++    0.3116,
++    6838
++   ]
++  ],
++  "outcome": null
++ },
++ "eth-updown-15m-1795230000": {
++  "series": "eth-updown-15m",
++  "tag": "sht15",
++  "sym": "ETHUSDT",
++  "win_s": 900,
++  "start": 1795230000,
++  "end": 1795230900,
++  "snaps": [
++   [
++    1795230181,
++    0.4,
++    0.4199,
++    6256
++   ]
++  ],
++  "outcome": null
++ },
++ "sol-updown-5m-1795230000": {
++  "series": "sol-updown-5m",
++  "tag": "sht5",
++  "sym": "SOLUSDT",
++  "win_s": 300,
++  "start": 1795230000,
++  "end": 1795230300,
++  "snaps": [
++   [
++    1795230181,
++    0.095,
++    0.1228,
++    4680
++   ]
++  ],
++  "outcome": null
+  }
+ }
+\ No newline at end of file
+diff --git a/results/signals.json b/results/signals.json
+index 4d04cdd..d1c851c 100644
+--- a/results/signals.json
++++ b/results/signals.json
+@@ -1,5 +1,5 @@
+ {
+- "updated": "2026-11-21T00:09:05Z",
++ "updated": "2026-11-21T03:03:02Z",
+  "scanned": 200,
+  "signals": [
+   {
+@@ -9,12 +9,27 @@
+    "outcome": "-",
+    "price": 0,
+    "edge": 0,
+-   "note": "объём 24ч 485520 против среднего 75374",
+-   "liq": 252639,
+-   "v24": 485520,
++   "note": "объём 24ч 495874 против среднего 76808",
++   "liq": 243464,
++   "v24": 495874,
+    "z": 0.0,
+    "end": "2027-01-01",
+-   "days_left": 41.0,
++   "days_left": 40.9,
++   "tradeable": false
++  },
++  {
++   "strategy": "vols",
++   "slug": "will-bitcoin-reach-120000-by-december-31-2026-625-425-562",
++   "question": "Will Bitcoin reach $120,000 by December 31, 2026?",
++   "outcome": "-",
++   "price": 0,
++   "edge": 0,
++   "note": "объём 24ч 129784 против среднего 21134",
++   "liq": 178432,
++   "v24": 129784,
++   "z": 0.0,
++   "end": "2027-01-01",
++   "days_left": 40.9,
+    "tradeable": false
+   },
+   {
+@@ -24,12 +39,12 @@
+    "outcome": "-",
+    "price": 0,
+    "edge": 0,
+-   "note": "объём 24ч 132523 против среднего 24034",
+-   "liq": 150897,
+-   "v24": 132523,
++   "note": "объём 24ч 132514 против среднего 23628",
++   "liq": 151840,
++   "v24": 132514,
+    "z": 0.0,
+    "end": "2027-01-01",
+-   "days_left": 41.0,
++   "days_left": 40.9,
+    "tradeable": false
+   },
+   {
+@@ -40,11 +55,11 @@
+    "price": 0,
+    "edge": 0,
+    "note": "объём 24ч 23116 против среднего 4139",
+-   "liq": 127869,
++   "liq": 129003,
+    "v24": 23116,
+    "z": 0.0,
+    "end": "2026-12-01",
+-   "days_left": 10.0,
++   "days_left": 9.9,
+    "tradeable": false
+   }
+  ]
+diff --git a/results/state.json b/results/state.json
+index 713e223..b2106c9 100644
+--- a/results/state.json
++++ b/results/state.json
+@@ -1,5 +1,5 @@
+ {
+- "cash": 5659.828635450771,
++ "cash": 6721.448456560966,
+  "positions": {
+   "will-bitcoin-dip-to-62pt5k-in-november-2026": {
+    "question": "Will Bitcoin dip to $62,500 in November?",
+@@ -19,27 +19,27 @@
+    "outcome": "No",
+    "strategy": "fav",
+    "entry": 0.915,
+-   "last": 0.9945,
++   "last": 0.9955,
+    "shares": 54.56,
+    "usd": 49.98,
+    "opened": "2026-11-08T02:29:10Z",
+    "epoch": 1794104950.605626
+   },
+-  "btc-updown-15m-1795219200": {
++  "eth-updown-5m-1795230000": {
+    "kind": "sht",
+-   "slug": "btc-updown-15m-1795219200",
+-   "question": "Bitcoin Up or Down - November 20, 7:00PM-7:15PM ET",
+-   "series": "btc-updown-15m",
+-   "outcome": "Up",
+-   "strategy": "sht15",
+-   "entry": 0.475,
+-   "last": 0.475,
+-   "shares": 638.46,
+-   "usd": 303.27,
+-   "opened": "2026-11-21T00:09:01Z",
+-   "epoch": 1795219741.5787277,
+-   "end_ts": 1795220100,
+-   "fair_up": 0.5613
++   "slug": "eth-updown-5m-1795230000",
++   "question": "Ethereum Up or Down - November 20, 10:00PM-10:05PM ET",
++   "series": "eth-updown-5m",
++   "outcome": "Down",
++   "strategy": "sht5",
++   "entry": 0.635,
++   "last": 0.635,
++   "shares": 565.58,
++   "usd": 359.14,
++   "opened": "2026-11-21T03:03:01Z",
++   "epoch": 1795230181.387171,
++   "end_ts": 1795230300,
++   "fair_up": 0.3116
+   }
+  },
+  "closed": [
+@@ -49,11 +49,11 @@
+    "outcome": "Down",
+    "entry": 0.24,
+    "exit": 1.0,
+-   "ret_pct": 108.33,
++   "ret_pct": 316.25,
+    "strategy": "sht5",
+    "opened": "2026-11-10T17:51:22Z",
+    "closed": "2026-11-16T02:41:01Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Ethereum Up or Down - November 10, 12:50PM-12:55PM ET",
+@@ -61,11 +61,11 @@
+    "outcome": "Down",
+    "entry": 0.2,
+    "exit": 1.0,
+-   "ret_pct": 150.0,
++   "ret_pct": 399.5,
+    "strategy": "sht5",
+    "opened": "2026-11-10T17:51:22Z",
+    "closed": "2026-11-16T02:41:01Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Ethereum Up or Down - November 10, 12:45PM-1:00PM ET",
+@@ -73,11 +73,11 @@
+    "outcome": "Down",
+    "entry": 0.15,
+    "exit": 1.0,
+-   "ret_pct": 233.33,
++   "ret_pct": 566.0,
+    "strategy": "sht15",
+    "opened": "2026-11-10T17:51:22Z",
+    "closed": "2026-11-16T02:41:01Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Solana Up or Down - November 10, 12:50PM-12:55PM ET",
+@@ -85,11 +85,11 @@
+    "outcome": "Down",
+    "entry": 0.125,
+    "exit": 1.0,
+-   "ret_pct": 300.0,
++   "ret_pct": 699.2,
+    "strategy": "sht5",
+    "opened": "2026-11-10T17:51:22Z",
+    "closed": "2026-11-16T02:41:01Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Will Bitcoin dip to $60,000 in November?",
+@@ -109,23 +109,23 @@
+    "outcome": "Up",
+    "entry": 0.52,
+    "exit": 1.0,
+-   "ret_pct": -3.85,
++   "ret_pct": 92.12,
+    "strategy": "sht5",
+    "opened": "2026-11-16T02:47:38Z",
+    "closed": "2026-11-16T06:49:39Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Ethereum Up or Down - November 15, 9:45PM-9:50PM ET",
+    "slug": "eth-updown-5m-1794797100",
+    "outcome": "Up",
+    "entry": 0.59,
+-   "exit": 1.0,
+-   "ret_pct": -15.25,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht5",
+    "opened": "2026-11-16T02:47:38Z",
+    "closed": "2026-11-16T06:49:39Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Solana Up or Down - November 15, 9:45PM-9:50PM ET",
+@@ -133,11 +133,11 @@
+    "outcome": "Up",
+    "entry": 0.64,
+    "exit": 1.0,
+-   "ret_pct": -21.88,
++   "ret_pct": 56.09,
+    "strategy": "sht5",
+    "opened": "2026-11-16T02:47:38Z",
+    "closed": "2026-11-16T06:49:39Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Bitcoin Up or Down - November 16, 1:45AM-2:00AM ET",
+@@ -145,35 +145,35 @@
+    "outcome": "Down",
+    "entry": 0.33,
+    "exit": 1.0,
+-   "ret_pct": 51.52,
++   "ret_pct": 202.73,
+    "strategy": "sht15",
+    "opened": "2026-11-16T06:49:48Z",
+    "closed": "2026-11-16T16:30:35Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Bitcoin Up or Down - November 17, 3:15AM-3:30AM ET",
+    "slug": "btc-updown-15m-1794903300",
+    "outcome": "Down",
+    "entry": 0.51,
+-   "exit": 1.0,
+-   "ret_pct": -1.96,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht15",
+    "opened": "2026-11-17T08:19:03Z",
+    "closed": "2026-11-17T17:41:23Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Ethereum Up or Down - November 17, 3:15AM-3:30AM ET",
+    "slug": "eth-updown-15m-1794903300",
+    "outcome": "Down",
+    "entry": 0.51,
+-   "exit": 1.0,
+-   "ret_pct": -1.96,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht15",
+    "opened": "2026-11-17T08:19:03Z",
+    "closed": "2026-11-17T17:41:23Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Bitcoin Up or Down - November 17, 12:40PM-12:45PM ET",
+@@ -181,35 +181,35 @@
+    "outcome": "Up",
+    "entry": 0.51,
+    "exit": 1.0,
+-   "ret_pct": -1.96,
++   "ret_pct": 95.88,
+    "strategy": "sht5",
+    "opened": "2026-11-17T17:41:29Z",
+    "closed": "2026-11-17T23:58:05Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Bitcoin Up or Down - November 17, 12:30PM-12:45PM ET",
+    "slug": "btc-updown-15m-1794936600",
+    "outcome": "Down",
+    "entry": 0.66,
+-   "exit": 1.0,
+-   "ret_pct": -24.24,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht15",
+    "opened": "2026-11-17T17:41:29Z",
+    "closed": "2026-11-17T23:58:05Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Ethereum Up or Down - November 17, 12:30PM-12:45PM ET",
+    "slug": "eth-updown-15m-1794936600",
+    "outcome": "Down",
+    "entry": 0.81,
+-   "exit": 1.0,
+-   "ret_pct": -38.27,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht15",
+    "opened": "2026-11-17T17:41:29Z",
+    "closed": "2026-11-17T23:58:05Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Solana Up or Down - November 17, 12:40PM-12:45PM ET",
+@@ -217,23 +217,23 @@
+    "outcome": "Down",
+    "entry": 0.25,
+    "exit": 1.0,
+-   "ret_pct": 100.0,
++   "ret_pct": 299.6,
+    "strategy": "sht5",
+    "opened": "2026-11-17T17:41:29Z",
+    "closed": "2026-11-17T23:58:05Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Bitcoin Up or Down - November 17, 6:55PM-7:00PM ET",
+    "slug": "btc-updown-5m-1794959700",
+    "outcome": "Up",
+    "entry": 0.2,
+-   "exit": 1.0,
+-   "ret_pct": 150.0,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht5",
+    "opened": "2026-11-17T23:58:17Z",
+    "closed": "2026-11-18T06:51:21Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Ethereum Up or Down - November 17, 6:55PM-7:00PM ET",
+@@ -241,11 +241,11 @@
+    "outcome": "Up",
+    "entry": 0.3,
+    "exit": 1.0,
+-   "ret_pct": 66.66,
++   "ret_pct": 233.0,
+    "strategy": "sht5",
+    "opened": "2026-11-17T23:58:17Z",
+    "closed": "2026-11-18T06:51:21Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Solana Up or Down - November 17, 6:55PM-7:00PM ET",
+@@ -253,71 +253,71 @@
+    "outcome": "Up",
+    "entry": 0.565,
+    "exit": 1.0,
+-   "ret_pct": -11.51,
++   "ret_pct": 76.81,
+    "strategy": "sht5",
+    "opened": "2026-11-17T23:58:17Z",
+    "closed": "2026-11-18T06:51:21Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Bitcoin Up or Down - November 18, 1:50AM-1:55AM ET",
+    "slug": "btc-updown-5m-1794984600",
+    "outcome": "Down",
+    "entry": 0.5,
+-   "exit": 1.0,
+-   "ret_pct": 0.0,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht5",
+    "opened": "2026-11-18T06:51:27Z",
+    "closed": "2026-11-18T16:00:25Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Bitcoin Up or Down - November 18, 1:45AM-2:00AM ET",
+    "slug": "btc-updown-15m-1794984300",
+    "outcome": "Down",
+    "entry": 0.41,
+-   "exit": 1.0,
+-   "ret_pct": 21.95,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht15",
+    "opened": "2026-11-18T06:51:27Z",
+    "closed": "2026-11-18T16:00:25Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Bitcoin Up or Down - November 18, 1:00AM-2:00AM ET",
+    "slug": "btc-updown-1h-1794981600",
+    "outcome": "Down",
+    "entry": 0.51,
+-   "exit": 1.0,
+-   "ret_pct": -1.96,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht1h",
+    "opened": "2026-11-18T06:51:27Z",
+    "closed": "2026-11-18T16:00:25Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Ethereum Up or Down - November 18, 1:50AM-1:55AM ET",
+    "slug": "eth-updown-5m-1794984600",
+    "outcome": "Down",
+    "entry": 0.5,
+-   "exit": 1.0,
+-   "ret_pct": 0.0,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht5",
+    "opened": "2026-11-18T06:51:27Z",
+    "closed": "2026-11-18T16:00:25Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Bitcoin Up or Down - November 18, 5:00PM-6:00PM ET",
+    "slug": "btc-updown-1h-1795039200",
+    "outcome": "Up",
+    "entry": 0.152,
+-   "exit": 1.0,
+-   "ret_pct": 228.94,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht1h",
+    "opened": "2026-11-18T22:54:59Z",
+    "closed": "2026-11-19T03:57:19Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Bitcoin Up or Down - November 18, 10:45PM-11:00PM ET",
+@@ -325,11 +325,11 @@
+    "outcome": "Up",
+    "entry": 0.82,
+    "exit": 1.0,
+-   "ret_pct": -39.02,
++   "ret_pct": 21.83,
+    "strategy": "sht15",
+    "opened": "2026-11-19T03:57:28Z",
+    "closed": "2026-11-19T12:38:12Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Ethereum Up or Down - November 18, 10:55PM-11:00PM ET",
+@@ -337,11 +337,11 @@
+    "outcome": "Up",
+    "entry": 0.73,
+    "exit": 1.0,
+-   "ret_pct": -31.51,
++   "ret_pct": 36.85,
+    "strategy": "sht5",
+    "opened": "2026-11-19T03:57:28Z",
+    "closed": "2026-11-19T12:38:12Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Bitcoin Up or Down - November 19, 7:35AM-7:40AM ET",
+@@ -349,11 +349,11 @@
+    "outcome": "Up",
+    "entry": 0.46,
+    "exit": 1.0,
+-   "ret_pct": 8.7,
++   "ret_pct": 117.17,
+    "strategy": "sht5",
+    "opened": "2026-11-19T12:38:26Z",
+    "closed": "2026-11-19T20:58:04Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Ethereum Up or Down - November 19, 7:35AM-7:40AM ET",
+@@ -361,23 +361,23 @@
+    "outcome": "Up",
+    "entry": 0.27,
+    "exit": 1.0,
+-   "ret_pct": 85.19,
++   "ret_pct": 270.0,
+    "strategy": "sht5",
+    "opened": "2026-11-19T12:38:26Z",
+    "closed": "2026-11-19T20:58:04Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Ethereum Up or Down - November 19, 7:30AM-7:45AM ET",
+    "slug": "eth-updown-15m-1795091400",
+    "outcome": "Up",
+    "entry": 0.47,
+-   "exit": 1.0,
+-   "ret_pct": 6.38,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht15",
+    "opened": "2026-11-19T12:38:26Z",
+    "closed": "2026-11-19T20:58:04Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Solana Up or Down - November 19, 7:35AM-7:40AM ET",
+@@ -385,59 +385,59 @@
+    "outcome": "Up",
+    "entry": 0.36,
+    "exit": 1.0,
+-   "ret_pct": 38.89,
++   "ret_pct": 177.5,
+    "strategy": "sht5",
+    "opened": "2026-11-19T12:38:26Z",
+    "closed": "2026-11-19T20:58:04Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Ethereum Up or Down - November 19, 3:55PM-4:00PM ET",
+    "slug": "eth-updown-5m-1795121700",
+    "outcome": "Down",
+    "entry": 0.73,
+-   "exit": 1.0,
+-   "ret_pct": -31.51,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht5",
+    "opened": "2026-11-19T20:58:21Z",
+    "closed": "2026-11-20T02:10:24Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Ethereum Up or Down - November 19, 3:45PM-4:00PM ET",
+    "slug": "eth-updown-15m-1795121100",
+    "outcome": "Down",
+    "entry": 0.445,
+-   "exit": 1.0,
+-   "ret_pct": 12.36,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht15",
+    "opened": "2026-11-19T20:58:21Z",
+    "closed": "2026-11-20T02:10:24Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Solana Up or Down - November 19, 3:55PM-4:00PM ET",
+    "slug": "sol-updown-5m-1795121700",
+    "outcome": "Down",
+    "entry": 0.51,
+-   "exit": 1.0,
+-   "ret_pct": -1.96,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht5",
+    "opened": "2026-11-19T20:58:21Z",
+    "closed": "2026-11-20T02:10:24Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Bitcoin Up or Down - November 19, 9:00PM-9:15PM ET",
+    "slug": "btc-updown-15m-1795140000",
+    "outcome": "Down",
+    "entry": 0.455,
+-   "exit": 1.0,
+-   "ret_pct": 9.89,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht15",
+    "opened": "2026-11-20T02:10:30Z",
+    "closed": "2026-11-20T10:00:09Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Ethereum Up or Down - November 19, 9:00PM-9:15PM ET",
+@@ -445,109 +445,191 @@
+    "outcome": "Down",
+    "entry": 0.62,
+    "exit": 1.0,
+-   "ret_pct": -19.35,
++   "ret_pct": 61.13,
+    "strategy": "sht15",
+    "opened": "2026-11-20T02:10:30Z",
+    "closed": "2026-11-20T10:00:09Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
+   },
+   {
+    "question": "Bitcoin Up or Down - November 20, 1:00PM-2:00PM ET",
+    "slug": "btc-updown-1h-1795197600",
+    "outcome": "Down",
+    "entry": 0.545,
+-   "exit": 1.0,
+-   "ret_pct": -8.26,
++   "exit": 0.0,
++   "ret_pct": -100.0,
+    "strategy": "sht1h",
+    "opened": "2026-11-20T18:30:48Z",
+    "closed": "2026-11-21T00:08:49Z",
+-   "reason": "нет данных расчёта, выигрыш"
++   "reason": "пересчитано: расчёт рынка по API (было ложное «нет данных, выигрыш»)"
++  },
++  {
++   "question": "Bitcoin Up or Down - November 20, 7:00PM-7:15PM ET",
++   "slug": "btc-updown-15m-1795219200",
++   "outcome": "Up",
++   "entry": 0.475,
++   "exit": 1.0,
++   "ret_pct": 110.53,
++   "strategy": "sht15",
++   "usd": 303.27,
++   "shares": 638.46,
++   "opened": "2026-11-21T00:09:01Z",
++   "closed": "2026-11-21T03:02:48Z",
++   "reason": "расчёт рынка, выигрыш"
+   }
+  ],
+  "curve": [
+   [
+-   "2026-11-16T02:40:54Z",
+-   2576.28
++   "2026-11-10T00:00:00Z",
++   1000.0
++  ],
++  [
++   "2026-11-16T02:41:02Z",
++   983.75
++  ],
++  [
++   "2026-11-16T02:41:01Z",
++   1139.31
++  ],
++  [
++   "2026-11-16T02:41:01Z",
++   1366.88
++  ],
++  [
++   "2026-11-16T02:41:01Z",
++   1753.71
++  ],
++  [
++   "2026-11-16T02:41:01Z",
++   2366.81
+   ],
+   [
+-   "2026-11-16T02:41:04Z",
+-   4739.52
++   "2026-11-16T06:49:39Z",
++   2475.82
+   ],
+   [
+-   "2026-11-16T02:42:52Z",
+-   4739.58
++   "2026-11-16T06:49:39Z",
++   2352.02
+   ],
+   [
+-   "2026-11-16T02:45:43Z",
+-   4739.58
++   "2026-11-16T06:49:39Z",
++   2417.99
+   ],
+   [
+-   "2026-11-16T02:47:42Z",
+-   4739.55
++   "2026-11-16T16:30:35Z",
++   2663.09
+   ],
+   [
+-   "2026-11-16T06:49:53Z",
+-   4641.94
++   "2026-11-17T17:41:23Z",
++   2529.93
+   ],
+   [
+-   "2026-11-16T16:30:43Z",
+-   4761.34
++   "2026-11-17T17:41:23Z",
++   2403.44
+   ],
+   [
+-   "2026-11-17T00:26:05Z",
+-   4761.34
++   "2026-11-17T23:58:05Z",
++   2518.66
+   ],
+   [
+-   "2026-11-17T08:19:07Z",
+-   4761.4
++   "2026-11-17T23:58:05Z",
++   2392.73
+   ],
+   [
+-   "2026-11-17T17:41:33Z",
+-   4751.76
++   "2026-11-17T23:58:05Z",
++   2273.09
+   ],
+   [
+-   "2026-11-17T23:58:20Z",
+-   4834.91
++   "2026-11-17T23:58:05Z",
++   2613.6
+   ],
+   [
+-   "2026-11-18T06:51:32Z",
+-   5329.68
++   "2026-11-18T06:51:21Z",
++   2482.92
+   ],
+   [
+-   "2026-11-18T16:00:37Z",
+-   5381.92
++   "2026-11-18T06:51:21Z",
++   2772.18
+   ],
+   [
+-   "2026-11-18T22:55:03Z",
+-   5381.92
++   "2026-11-18T06:51:21Z",
++   2878.65
+   ],
+   [
+-   "2026-11-19T03:57:31Z",
+-   5997.12
++   "2026-11-18T16:00:25Z",
++   2734.72
+   ],
+   [
+-   "2026-11-19T12:38:29Z",
+-   5785.32
++   "2026-11-18T16:00:25Z",
++   2597.98
+   ],
+   [
+-   "2026-11-19T20:58:24Z",
+-   6186.39
++   "2026-11-18T16:00:25Z",
++   2468.08
+   ],
+   [
+-   "2026-11-20T02:10:34Z",
+-   6120.27
++   "2026-11-18T16:00:25Z",
++   2344.68
+   ],
+   [
+-   "2026-11-20T10:00:22Z",
+-   6090.75
++   "2026-11-19T03:57:19Z",
++   2227.45
+   ],
+   [
+-   "2026-11-20T18:30:50Z",
+-   6090.8
++   "2026-11-19T12:38:12Z",
++   2251.76
+   ],
+   [
+-   "2026-11-21T00:09:05Z",
+-   6065.32
++   "2026-11-19T12:38:12Z",
++   2293.25
++  ],
++  [
++   "2026-11-19T20:58:04Z",
++   2427.6
++  ],
++  [
++   "2026-11-19T20:58:04Z",
++   2755.33
++  ],
++  [
++   "2026-11-19T20:58:04Z",
++   2617.56
++  ],
++  [
++   "2026-11-19T20:58:04Z",
++   2849.87
++  ],
++  [
++   "2026-11-20T02:10:24Z",
++   2707.37
++  ],
++  [
++   "2026-11-20T02:10:24Z",
++   2572.01
++  ],
++  [
++   "2026-11-20T02:10:24Z",
++   2443.41
++  ],
++  [
++   "2026-11-20T10:00:09Z",
++   2321.24
++  ],
++  [
++   "2026-11-20T10:00:09Z",
++   2392.18
++  ],
++  [
++   "2026-11-21T00:08:49Z",
++   2272.57
++  ],
++  [
++   "2026-11-21T03:02:03Z",
++   6848.26
++  ],
++  [
++   "2026-11-21T03:03:02Z",
++   7182.87
+   ]
+  ],
+  "done_keys": {},
+@@ -579,7 +661,7 @@
+   },
+   {
+    "p": 0.7764,
+-   "win": 1,
++   "win": 0,
+    "tag": "sht5"
+   },
+   {
+@@ -594,12 +676,12 @@
+   },
+   {
+    "p": 0.664,
+-   "win": 1,
++   "win": 0,
+    "tag": "sht15"
+   },
+   {
+    "p": 0.5657,
+-   "win": 1,
++   "win": 0,
+    "tag": "sht15"
+   },
+   {
+@@ -609,12 +691,12 @@
+   },
+   {
+    "p": 0.8557,
+-   "win": 1,
++   "win": 0,
+    "tag": "sht15"
+   },
+   {
+    "p": 0.951,
+-   "win": 1,
++   "win": 0,
+    "tag": "sht15"
+   },
+   {
+@@ -624,7 +706,7 @@
+   },
+   {
+    "p": 0.5859,
+-   "win": 1,
++   "win": 0,
+    "tag": "sht5"
+   },
+   {
+@@ -639,27 +721,27 @@
+   },
+   {
+    "p": 0.7402,
+-   "win": 1,
++   "win": 0,
+    "tag": "sht5"
+   },
+   {
+    "p": 0.719,
+-   "win": 1,
++   "win": 0,
+    "tag": "sht15"
+   },
+   {
+    "p": 0.7881,
+-   "win": 1,
++   "win": 0,
+    "tag": "sht1h"
+   },
+   {
+    "p": 0.7512,
+-   "win": 1,
++   "win": 0,
+    "tag": "sht5"
+   },
+   {
+    "p": 0.4547,
+-   "win": 1,
++   "win": 0,
+    "tag": "sht1h"
+   },
+   {
+@@ -684,7 +766,7 @@
+   },
+   {
+    "p": 0.606,
+-   "win": 1,
++   "win": 0,
+    "tag": "sht15"
+   },
+   {
+@@ -694,22 +776,22 @@
+   },
+   {
+    "p": 0.98,
+-   "win": 1,
++   "win": 0,
+    "tag": "sht5"
+   },
+   {
+    "p": 0.906,
+-   "win": 1,
++   "win": 0,
+    "tag": "sht15"
+   },
+   {
+    "p": 0.9599,
+-   "win": 1,
++   "win": 0,
+    "tag": "sht5"
+   },
+   {
+    "p": 0.918,
+-   "win": 1,
++   "win": 0,
+    "tag": "sht15"
+   },
+   {
+@@ -719,23 +801,39 @@
+   },
+   {
+    "p": 0.7214,
+-   "win": 1,
++   "win": 0,
+    "tag": "sht1h"
++  },
++  {
++   "p": 0.5613,
++   "win": 1,
++   "tag": "sht15"
+   }
+  ],
+- "runs": 28,
++ "runs": 29,
+  "stats": {
+-  "equity": 6065.32,
+-  "cash": 5659.83,
++  "equity": 7182.87,
++  "cash": 6721.45,
+   "open": 3,
+-  "trades": 35,
+-  "wins": 16,
+-  "winrate": 45.7,
+-  "pnl_pct": 506.53,
+-  "updated": "2026-11-21T00:09:05Z",
+-  "runs": 28,
++  "trades": 36,
++  "wins": 18,
++  "winrate": 50.0,
++  "pnl_pct": 618.29,
++  "updated": "2026-11-21T03:03:02Z",
++  "runs": 29,
+   "sht_open": 1,
+-  "sht_trades": 34,
+-  "sht_pnl": 2683.11
++  "sht_trades": 35,
++  "sht_pnl": 3742.53
++ },
++ "audit": {
++  "multi_fix_2026_11_21": {
++   "fake_wins_fixed": 34,
++   "resolved": {
++    "win": 17,
++    "lose": 17,
++    "unknown": 0
++   },
++   "cash_delta": 782.94
++  }
+  }
+ }
+\ No newline at end of file
+diff --git a/src/backend/api/dashboard.py b/src/backend/api/dashboard.py
+index 15e306c..c020659 100644
+--- a/src/backend/api/dashboard.py
++++ b/src/backend/api/dashboard.py
+@@ -60,8 +60,7 @@ async def get_dashboard_overview() -> Dict[str, Any]:
+             "markets": {
+                 "total": len(markets),
+                 "active": len([m for m in markets if m.get('status') == 'active']),
+-                "
+-volume_24hr": sum(m.get('volume_24hr', 0) for m in markets)
++                "volume_24hr": sum(m.get('volume_24hr', 0) for m in markets)
+             },
+             "signals": {
+                 "total": len(signals),
+@@ -117,8 +116,7 @@ async def get_realtime_data() -> Dict[str, Any]:
+         # Get latest markets
+         markets = await polymarket_client.get_markets(tag_id=21, limit=20)
+         
+-        # Get active signal
+-s
++        # Get active signals
+         signals = await database.get_signals(
+             status=SignalStatus.ACTIVE,
+             limit=20
+@@ -227,8 +225,7 @@ async def get_signals_chart_data(
+         for signal in signals:
+             date_str = signal.created_at.strftime('%Y-%m-%d')
+             if date_str not in daily_data:
+-                daily_data[dat
+-e_str] = {
++                daily_data[date_str] = {
+                     "count": 0,
+                     "by_type": {t.value: 0 for t in SignalType}
+                 }
+@@ -346,8 +343,7 @@ async def get_dashboard_settings() -> Dict[str, Any]:
+             "refresh_interval": 30,
+             "notifications_enabled": True,
+             "sound_enabled": True,
+-            "auto_t
+-rade": settings.AUTO_TRADE,
++            "auto_trade": settings.AUTO_TRADE,
+             "paper_trading_enabled": settings.ENABLE_PAPER_TRADING,
+             "real_trading_enabled": settings.ENABLE_REAL_TRADING
+         }
+diff --git a/src/backend/api/markets.py b/src/backend/api/markets.py
+index 23d6ebb..938bd3c 100644
+--- a/src/backend/api/markets.py
++++ b/src/backend/api/markets.py
+@@ -55,8 +55,7 @@ async def get_markets(
+         )
+         
+         # Filter by status
+-        if status
+-:
++        if status:
+             markets = [m for m in markets if m.get('status') == status.value]
+         
+         # Filter by market type
+@@ -98,8 +97,7 @@ async def get_markets(
+         
+         # Cache the results
+         if use_cache:
+-            await cache.set_market
+-s(cache_key, market_schemas)
++            await cache.set_markets(cache_key, market_schemas)
+         
+         return market_schemas
+     
+@@ -147,8 +145,7 @@ async def get_market_by_slug(market_slug: str) -> Market:
+             market_type=market_data.get('market_type', MarketType.BINARY),
+             status=market_data.get('status', MarketStatus.ACTIVE),
+             clob_token_ids=market_data.get('clob_token_ids', []),
+-       
+-     image=market_data.get('image'),
++            image=market_data.get('image'),
+             icon=market_data.get('icon'),
+             fee=market_data.get('fee', 0.0)
+         )
+@@ -228,8 +225,7 @@ async def get_active_markets(
+ @router.get("/stats", response_model=Dict[str, Any])
+ async def get_market_stats() -> Dict[str, Any]:
+     """
+-    Get market sta
+-tistics.
++    Get market statistics.
+     """
+     try:
+         markets = await get_markets(limit=1000, use_cache=True)
+@@ -282,8 +278,7 @@ async def scan_markets(
+             "status": "success",
+             "markets_scanned": result.get("markets_scanned", 0),
+             "new_markets": result.get("new_markets", 0),
+-            "updated_markets": result.get("updated_markets", 0)
+-,
++            "updated_markets": result.get("updated_markets", 0),
+             "timestamp": datetime.utcnow().isoformat()
+         }
+     
+diff --git a/src/backend/api/paper_trading.py b/src/backend/api/paper_trading.py
+index 236d151..4b32608 100644
+--- a/src/backend/api/paper_trading.py
++++ b/src/backend/api/paper_trading.py
+@@ -65,8 +65,7 @@ async def get_paper_positions(
+     
+     except Exception as e:
+         logger.error(f"Error fetching positions: {e}")
+-        raise HTTPException(status_code=500, detail=f"Error fetching positions: {s
+-tr(e)}")
++        raise HTTPException(status_code=500, detail=f"Error fetching positions: {str(e)}")
+ 
+ 
+ @router.get("/positions/{position_id}", response_model=Position)
+@@ -127,8 +126,7 @@ async def get_paper_trade(trade_id: str) -> PaperTrade:
+         trade = await database.get_paper_trade_by_id(trade_id)
+         
+         if not trade:
+-            raise HTTPException(status_code=404, detail=f"Trade 
+-with ID '{trade_id}' not found")
++            raise HTTPException(status_code=404, detail=f"Trade with ID '{trade_id}' not found")
+         
+         return trade
+     
+@@ -189,8 +187,7 @@ async def execute_paper_trade_from_signal(signal_id: str) -> PaperTrade:
+     except HTTPException:
+         raise
+     except Exception as e:
+-        logger.error(f"Error executing trade from signal {signal_id}:
+- {e}")
++        logger.error(f"Error executing trade from signal {signal_id}: {e}")
+         raise HTTPException(status_code=500, detail=f"Error executing trade: {str(e)}")
+ 
+ 
+@@ -250,8 +247,7 @@ async def get_portfolio_snapshot() -> Dict[str, Any]:
+             "timestamp": datetime.utcnow().isoformat()
+         }
+         
+-  
+-      return snapshot
++        return snapshot
+     
+     except Exception as e:
+         logger.error(f"Error fetching portfolio snapshot: {e}")
+@@ -303,8 +299,7 @@ async def get_paper_performance(
+             "timestamp": datetime.utcnow().isoformat()
+         }
+     
+-    except Except
+-ion as e:
++    except Exception as e:
+         logger.error(f"Error fetching performance: {e}")
+         raise HTTPException(status_code=500, detail=f"Error fetching performance: {str(e)}")
+ 
+diff --git a/src/backend/api/signals.py b/src/backend/api/signals.py
+index abbec1a..2f1db9e 100644
+--- a/src/backend/api/signals.py
++++ b/src/backend/api/signals.py
+@@ -49,8 +49,7 @@ async def get_signals(
+         # Get signals from database
+         signals = await database.get_signals(
+             limit=limit,
+-  
+-          offset=offset,
++            offset=offset,
+             signal_type=signal_type,
+             status=status,
+             market_id=market_id,
+@@ -111,8 +110,7 @@ async def get_signal_by_id(signal_id: str) -> Signal:
+ @router.get("/active", response_model=List[Signal])
+ async def get_active_signals(
+     limit: int = Query(100, ge=1, le=1000),
+-    us
+-e_cache: bool = Query(True)
++    use_cache: bool = Query(True)
+ ) -> List[Signal]:
+     """
+     Get all active signals.
+@@ -177,8 +175,7 @@ async def get_signal_stats() -> Dict[str, Any]:
+     Get signal statistics.
+     """
+     try:
+-        signals = await get
+-_signals(limit=1000, use_cache=True)
++        signals = await get_signals(limit=1000, use_cache=True)
+         
+         total_signals = len(signals)
+         active_signals = len([s for s in signals if s.status == SignalStatus.ACTIVE])
+@@ -230,8 +227,7 @@ async def get_top_signals(
+     """
+     Get top signals by edge value.
+     """
+-  
+-  return await get_signals(
++    return await get_signals(
+         limit=limit,
+         signal_type=signal_type,
+         sort_by="edge",
+diff --git a/src/backend/automation/notifier.py b/src/backend/automation/notifier.py
+index 403b972..ad7ed3e 100644
+--- a/src/backend/automation/notifier.py
++++ b/src/backend/automation/notifier.py
+@@ -126,8 +126,7 @@ title
+             return False
+         
+         try:
+-            url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMe
+-ssage"
++            url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage"
+             
+             # Format message
+             message = f"*{notification['title']}*\n\n{notification['message']}"
+@@ -310,8 +309,7 @@ ssage"
+         }
+         
+         return await self.send_notification(
+-            Notifi
+-cationType.TRADE,
++            NotificationType.TRADE,
+             title,
+             message,
+             data
+diff --git a/src/backend/automation/paper_trading.py b/src/backend/automation/paper_trading.py
+index 097f2fd..9a31c0b 100644
+--- a/src/backend/automation/paper_trading.py
++++ b/src/backend/automation/paper_trading.py
+@@ -70,8 +70,7 @@ class PaperTradingEngine:
+         fee_rate: float = 0.005  # 0.5% fee
+     ):
+         """Initialize the paper trading engine"""
+-        self.initial_balance = initia
+-l_balance
++        self.initial_balance = initial_balance
+         self.balance = initial_balance
+         self.available_balance = initial_balance
+         self.fee_rate = fee_rate
+@@ -132,8 +131,7 @@ l_balance
+         
+         # Determine side (buy or sell)
+         # For prediction markets, we always "buy" shares
+-        
+-side = TradeSide.BUY
++        side = TradeSide.BUY
+         
+         # Create trade
+         trade_id = generate_id()
+@@ -191,8 +189,7 @@ side = TradeSide.BUY
+         logger.info(
+             f" Paper trade executed: {signal.market_title} | "
+             f"Outcome: {signal.outcome} | Amount: ${position_size:,.2f} | "
+-            f"Price: {signal.entry_p
+-rice:.2%}"
++            f"Price: {signal.entry_price:.2%}"
+         )
+         
+         return trade
+@@ -257,8 +254,7 @@ rice:.2%}"
+                 # Get current market data
+                 market = await self.polymarket.get_market_by_slug(position.market_title)
+                 if not market:
+-                    
+-continue
++                    continue
+                 
+                 clob_token_ids = market.get("clobTokenIds", [])
+                 if not clob_token_ids or position.outcome_index >= len(clob_token_ids):
+@@ -310,8 +306,7 @@ continue
+             return
+         
+         # Check stop loss
+-        if signal.stop_loss and position.current_price <= 
+-signal.stop_loss:
++        if signal.stop_loss and position.current_price <= signal.stop_loss:
+             await self.close_position(trade_id, "stop_loss")
+         
+         # Check take profit
+@@ -370,8 +365,7 @@ signal.stop_loss:
+         
+         drawdown = (self.stats["max_balance"] - self.balance) / self.stats["max_balance"]
+         if drawdown > self.stats["max_drawdown"]:
+-            self.sta
+-ts["max_drawdown"] = drawdown
++            self.stats["max_drawdown"] = drawdown
+         
+         # Update trade in database
+         await self.database.update_paper_trade(
+@@ -432,8 +426,7 @@ ts["max_drawdown"] = drawdown
+         
+         return {
+             "balance": self.balance,
+-            "available_balance": self.avai
+-lable_balance,
++            "available_balance": self.available_balance,
+             "initial_balance": self.initial_balance,
+             "total_pnl": total_pnl,
+             "total_pnl_pct": total_pnl_pct,
+@@ -488,8 +481,7 @@ lable_balance,
+     
+     async def get_performance_metrics(self) -> Dict[str, Any]:
+         """
+-        Get performance metr
+-ics
++        Get performance metrics
+         
+         Returns:
+             Dictionary with performance metrics
+diff --git a/src/backend/automation/scheduler.py b/src/backend/automation/scheduler.py
+index 8de0d92..5c1bc26 100644
+--- a/src/backend/automation/scheduler.py
++++ b/src/backend/automation/scheduler.py
+@@ -55,8 +55,7 @@ class Scheduler:
+         self.signal_interval = signal_interval
+         self.position_update_interval = position_update_interval
+         self.portfolio_snapshot_interval = portfolio_snapshot_interval
+-        self.auto_trade = aut
+-o_trade
++        self.auto_trade = auto_trade
+         self.running = False
+         
+         # Initialize components
+@@ -119,8 +118,7 @@ o_trade
+             return
+         
+         logger.info("Stopping Polymarket Crypto Lab Scheduler")
+-      
+-  self.running = False
++        self.running = False
+         
+         # Cancel all tasks
+         for task_name, task in self.tasks.items():
+@@ -175,8 +173,7 @@ o_trade
+             # Wait for next interval
+             await asyncio.sleep(self.scan_interval)
+     
+-    as
+-ync def _signal_generation_loop(self) -> None:
++    async def _signal_generation_loop(self) -> None:
+         """
+         Signal generation loop.
+         """
+@@ -223,8 +220,7 @@ ync def _signal_generation_loop(self) -> None:
+                 logger.debug("Starting position update...")
+                 
+                 # Update positions with current prices
+-                updated_positions = await self.pap
+-er_trading_engine.update_positions()
++                updated_positions = await self.paper_trading_engine.update_positions()
+                 
+                 self.stats["positions_updated"] += updated_positions
+                 self.last_run["position_update"] = datetime.utcnow()
+@@ -267,8 +263,7 @@ er_trading_engine.update_positions()
+             except Exception as e:
+                 self.stats["errors"] += 1
+                 self.stats["last_error"] = str(e)
+-                logger.error(
+-f"Error in portfolio snapshot loop: {e}\n{traceback.format_exc()}")
++                logger.error(f"Error in portfolio snapshot loop: {e}\n{traceback.format_exc()}")
+                 
+                 # Wait before retrying
+                 await asyncio.sleep(60)
+@@ -317,8 +312,7 @@ f"Error in portfolio snapshot loop: {e}\n{traceback.format_exc()}")
+                         logger.info(f"Auto-traded signal {signal.id}: {signal.market_title} - {signal.outcome} (edge: {getattr(signal, 'edge', 0):.2%})")
+                         
+                         # Notify
+-                        await self.not
+-ifier.notify_trade(trade)
++                        await self.notifier.notify_trade(trade)
+                     
+                 except Exception as e:
+                     logger.error(f"Error auto-trading signal {signal.id}: {e}")
+@@ -369,8 +363,7 @@ ifier.notify_trade(trade)
+             self.stats["last_error"] = str(e)
+             logger.error(f"Error in run_once: {e}\n{traceback.format_exc()}")
+         
+-        
+-return self.stats
++        return self.stats
+     
+     def get_stats(self) -> Dict[str, Any]:
+         """
+@@ -429,8 +422,7 @@ return self.stats
+ 
+ # Global scheduler instance
+ scheduler = Scheduler(
+-    scan_interval=se
+-ttings.MARKET_SCAN_INTERVAL,
++    scan_interval=settings.MARKET_SCAN_INTERVAL,
+     signal_interval=settings.SIGNAL_GENERATION_INTERVAL,
+     position_update_interval=settings.POSITION_UPDATE_INTERVAL,
+     portfolio_snapshot_interval=settings.PORTFOLIO_SNAPSHOT_INTERVAL,
+diff --git a/src/backend/automation/trader.py b/src/backend/automation/trader.py
+index 25186fd..38ddce5 100644
+--- a/src/backend/automation/trader.py
++++ b/src/backend/automation/trader.py
+@@ -75,8 +75,7 @@ class Trader:
+         """
+         Verify wallet configuration.
+         """
+-        tr
+-y:
++        try:
+             # Create account from private key
+             account = Account.from_key(self.private_key)
+             
+@@ -139,8 +138,7 @@ y:
+             market_id: Market ID
+             outcome: Outcome to trade
+             side: BUY or SELL
+-            amount: Amount
+- in pUSD
++            amount: Amount in pUSD
+             price: Price (0-1 for binary markets)
+             signal: Optional signal that triggered this trade
+         
+@@ -194,8 +192,7 @@ y:
+                 side=side,
+                 amount=amount,
+                 price=price,
+-                signal_id=signal.id if signal else Non
+-e,
++                signal_id=signal.id if signal else None,
+                 status=TradeStatus.PENDING,
+                 filled_amount=0.0,
+                 filled_price=0.0,
+@@ -253,8 +250,7 @@ e,
+             # Get current price for the outcome
+             market = await self.polymarket_client.get_market_by_slug(signal.market_slug)
+             if not market:
+-                logger.error(f
+-"Market not found: {signal.market_slug}")
++                logger.error(f"Market not found: {signal.market_slug}")
+                 return None
+             
+             # Find the outcome price
+@@ -316,8 +312,7 @@ e,
+             
+             return {"status": "filled", "filled_amount": 100, "filled_price": 0.5}
+             
+-        except Excep
+-tion as e:
++        except Exception as e:
+             logger.error(f"Error fetching order status {order_id}: {e}")
+             return None
+     
+@@ -376,8 +371,7 @@ tion as e:
+             
+             return trade
+             
+-        except Exception as 
+-e:
++        except Exception as e:
+             logger.error(f"Error closing position: {e}")
+             raise
+     
+@@ -438,8 +432,7 @@ e:
+             if outcome in outcomes:
+                 index = outcomes.index(outcome)
+                 if index < len(clob_token_ids):
+-                    return clob_token_ids[i
+-ndex]
++                    return clob_token_ids[index]
+             
+             return None
+             
+@@ -512,8 +505,7 @@ ndex]
+             }
+             
+             # Send request
+-            async with aiohttp.ClientSession() as 
+-session:
++            async with aiohttp.ClientSession() as session:
+                 async with session.post(
+                     url,
+                     json=payload,
+diff --git a/src/backend/edge_finder/scanner.py b/src/backend/edge_finder/scanner.py
+deleted file mode 100644
+index 01f894e..0000000
+--- a/src/backend/edge_finder/scanner.py
++++ /dev/null
+@@ -1 +0,0 @@
+-Too many requests to this site right now. Wait before retrying, or open a different source.
+\ No newline at end of file
+diff --git a/src/backend/edge_finder/signals.py b/src/backend/edge_finder/signals.py
+deleted file mode 100644
+index 01f894e..0000000
+--- a/src/backend/edge_finder/signals.py
++++ /dev/null
+@@ -1 +0,0 @@
+-Too many requests to this site right now. Wait before retrying, or open a different source.
+\ No newline at end of file
+diff --git a/src/backend/models/schemas.py b/src/backend/models/schemas.py
+index 0636ac2..b25c2c6 100644
+--- a/src/backend/models/schemas.py
++++ b/src/backend/models/schemas.py
+@@ -75,8 +75,7 @@ class MarketBase(BaseModel):
+ class MarketCreate(MarketBase):
+     """Schema for creating a market"""
+     condition_id: Optional[str] = Field(default=None, description="Condition ID")
+-    outcomes: List[str] = Field(default_factory=list, description="List of
+- outcomes")
++    outcomes: List[str] = Field(default_factory=list, description="List of outcomes")
+     end_date: Optional[datetime] = Field(default=None, description="Market end date")
+     resolution_source: Optional[str] = Field(default=None, description="Resolution source")
+     
+@@ -108,8 +107,7 @@ class Market(MarketBase):
+ 
+ 
+ class MarketUpdate(BaseModel):
+-    """Schema for upd
+-ating a market"""
++    """Schema for updating a market"""
+     outcome_prices: Optional[List[float]] = Field(default=None, description="Updated outcome prices")
+     volume_24hr: Optional[float] = Field(default=None, description="Updated 24-hour volume")
+     liquidity: Optional[float] = Field(default=None, description="Updated liquidity")
+@@ -152,8 +150,7 @@ class SignalBase(BaseModel):
+ 
+ class SignalCreate(SignalBase):
+     """Schema for creating a signal"""
+-    outcome: Optional[str] 
+-= Field(default=None, description="Outcome (Yes/No)")
++    outcome: Optional[str] = Field(default=None, description="Outcome (Yes/No)")
+     outcome_index: Optional[int] = Field(default=None, description="Outcome index")
+     entry_price: float = Field(..., description="Entry price (0-1)")
+     current_price: float = Field(..., description="Current price (0-1)")
+@@ -187,8 +184,7 @@ class Signal(SignalCreate):
+         from_attributes = True
+ 
+ 
+-# ==================== TRADING SCHEMAS =========
+-===========
++# ==================== TRADING SCHEMAS ====================
+ 
+ class TradeBase(BaseModel):
+     """Base trade schema"""
+@@ -231,8 +227,7 @@ class Position(BaseModel):
+     entry_price: float = Field(..., description="Entry price (0-1)")
+     current_price: float = Field(..., description="Current price (0-1)")
+     pnl: float = Field(default=0.0, description="Profit/Loss in pUSD")
+-    pnl_pct: float = Field(default=0.0,
+- description="Profit/Loss percentage")
++    pnl_pct: float = Field(default=0.0, description="Profit/Loss percentage")
+     created_at: datetime = Field(default_factory=datetime.utcnow, description="Creation timestamp")
+     
+     class Config:
+@@ -277,8 +272,7 @@ class PaperTrade(PaperTradeCreate):
+     filled_amount: float = Field(default=0.0, description="Filled amount")
+     avg_fill_price: float = Field(default=0.0, description="Average fill price")
+     current_price: float = Field(default=0.0, description="Current price (0-1)")
+-    pnl: float = 
+-Field(default=0.0, description="Profit/Loss in pUSD")
++    pnl: float = Field(default=0.0, description="Profit/Loss in pUSD")
+     pnl_pct: float = Field(default=0.0, description="Profit/Loss percentage")
+     created_at: datetime = Field(default_factory=datetime.utcnow, description="Creation timestamp")
+     updated_at: Optional[datetime] = Field(default=None, description="Last update timestamp")
+@@ -325,8 +319,7 @@ class UserSettings(BaseModel):
+     user_id: Optional[str] = Field(default=None, description="User ID")
+     
+     # Trading settings
+-    max_position_size: float = Field(default=1000.0, 
+-description="Maximum position size")
++    max_position_size: float = Field(default=1000.0, description="Maximum position size")
+     max_portfolio_risk: float = Field(default=0.05, description="Maximum portfolio risk")
+     stop_loss_pct: float = Field(default=0.10, description="Stop loss percentage")
+     take_profit_pct: float = Field(default=0.20, description="Take profit percentage")
+@@ -367,8 +360,7 @@ class DashboardData(BaseModel):
+     active_markets: int = Field(..., description="Number of active markets")
+     
+     # Portfolio
+-    portfolio: Portfolio = Field(..., descriptio
+-n="Portfolio data")
++    portfolio: Portfolio = Field(..., description="Portfolio data")
+     
+     # Signals
+     active_signals: int = Field(..., description="Number of active signals")
+diff --git a/src/backend/utils/logger.py b/src/backend/utils/logger.py
+index 799da41..c0caa5d 100644
+--- a/src/backend/utils/logger.py
++++ b/src/backend/utils/logger.py
+@@ -62,5 +62,4 @@ def get_logger(name: str) -> logging.Logger:
+     Returns:
+         Configured logger instance
+     """
+-  
+-  return logging.getLogger(name)
++    return logging.getLogger(name)
+-- 
+2.47.3
+
