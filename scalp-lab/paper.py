@@ -24,7 +24,8 @@ except Exception:
 
 STATE_PATH = "results/paper.json"
 CAPITAL_START = 1000.0
-MAX_TRACK = 8
+MAX_TRACK = 12
+MAX_OPEN = 6      # потолок одновременно открытых позиций: не наращиваем экспозицию выше лимита
 # Бог-уровень отбора: не жёсткий бан по стабильности, а композитный скор.
 # Стабильность параметров штрафует скор, но не отсекает стратегию с
 # доказанным эджем; зато шум (t <= 1.5) в портфель не попадает никогда.
@@ -282,6 +283,11 @@ def main():
                 pos["fund"] = pos.get("fund", 0.0) + pos["signal"] * fpb[i]
             if s != 0.0:
                 if pos is None or pos["signal"] != s:
+                    if pos is None and len(st["positions"]) >= MAX_OPEN:
+                        # лимит открытых позиций исчерпан: не наращиваем экспозицию,
+                        # ключ вернётся в торговлю когда освободится слот
+                        seen[t["key"]] = str(dts[-1])
+                        continue
                     if pos is not None:
                         close_pos(st, t["key"], px, ts, "signal flip")
                     size = round(gmult * key_mult(st, t["key"]), 4)
