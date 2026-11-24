@@ -1,5 +1,4 @@
 strategy,symbol,tf,oos_sharpe,oos_pf,oos_t,trades,param_stability,is_sharpe_avg,folds,fee_mode,maker_sharpe,maker_pf,daily_pct,monthly_pct,trades_per_day,usd_per_month_1000
-bb_maker,NEARUSDT,1m,3.005,1.018,1.96,3632,0.29,5.25,31,maker,3.0053720810475917,1.0179745334215657,0.004322,0.138125,20.18,138.12
 vol_burst_revert,ARBUSDT,15m,2.49,1.059,2.29,209,1.0,2.23,22,maker,2.4929750616104207,1.0588738751448656,0.002467,0.076722,0.57,76.72
 bb_maker,NEARUSDT,5m,2.367,1.028,2.25,3787,1.0,-0.63,47,maker,2.395046952048608,1.0278381606717493,0.002975,0.093199,10.38,93.2
 vol_burst_revert,ARBUSDT,5m,2.187,1.029,2.08,619,1.0,1.61,47,maker,2.193906896285761,1.0291251020194545,0.002552,0.07947,1.7,79.47

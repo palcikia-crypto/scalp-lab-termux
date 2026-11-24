@@ -1,6 +1,5 @@
 strategy,symbol,tf,oos_sharpe,oos_pf,oos_t,trades,folds,param_stability,days,wave,verdict
 spike_bb,ATOMUSDT,1m,4.278,1.282,2.79,67,31,0.45,180,,filtered
-bb_maker,NEARUSDT,1m,3.005,1.018,1.96,3632,31,0.29,180,,passed
 spike_bb,LINKUSDT,1m,2.824,1.2,1.84,50,31,0.32,180,,filtered
 crash_revert,XRPUSDT,15m,2.596,1.221,2.39,50,22,0.23,365,,filtered
 vol_burst_revert,ARBUSDT,15m,2.49,1.059,2.29,209,22,1.0,365,,passed
@@ -131,6 +130,7 @@ spike_bb,SUIUSDT,15m,0.732,1.037,0.67,172,22,0.18,365,,filtered
 bollinger_reversion,NEARUSDT,5m,0.722,1.01,0.69,2592,47,0.32,365,,filtered
 funding_revert,NEARUSDT,15m,0.713,1.017,0.65,401,22,0.23,365,,filtered
 spike_revert,NEARUSDT,15m,0.71,1.022,0.65,382,22,0.27,365,,filtered
+bb_maker,NEARUSDT,1m,0.708,1.004,0.46,3822,31,1.0,180,,filtered
 spike_follow,ETHUSDT,1m,0.701,1.045,0.46,55,31,0.32,180,,filtered
 spike_bb,AVAXUSDT,5m,0.693,1.032,0.66,179,47,0.36,365,,filtered
 spike_revert,BTCUSDT,1m,0.684,1.14,0.45,9,31,0.52,180,,filtered
