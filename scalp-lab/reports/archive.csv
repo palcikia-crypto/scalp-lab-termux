@@ -15,7 +15,6 @@ crash_revert,SOLUSDT,5m,2.042,1.252,1.94,39,47,0.3,365,,filtered
 spike_follow,SOLUSDT,1m,2.041,1.111,1.33,92,31,0.42,180,,filtered
 spike_bb,BNBUSDT,5m,1.865,1.178,1.77,53,47,0.34,365,,filtered
 spike_revert,SUIUSDT,15m,1.859,1.077,1.71,290,22,1.0,365,,passed
-wick_vol,FILUSDT,5m,1.857,1.025,1.76,1120,47,1.0,365,,passed
 crash_revert,BTCUSDT,5m,1.811,1.454,1.72,8,47,0.57,365,,filtered
 spike_follow,BTCUSDT,15m,1.805,1.123,1.66,97,22,0.18,365,,filtered
 spike_bb,SOLUSDT,1m,1.732,1.139,1.13,44,31,0.58,180,,filtered
@@ -173,6 +172,7 @@ bb_regime,ARBUSDT,15m,0.561,1.013,0.52,466,22,0.36,365,,filtered
 crash_revert,AVAXUSDT,1m,0.543,1.098,0.35,16,31,0.52,180,,filtered
 streak_vol,PEPEUSDT,15m,0.542,1.017,0.5,452,22,0.23,365,,filtered
 streak_vol,ATOMUSDT,5m,0.53,1.011,0.5,1111,47,0.17,365,,filtered
+wick_vol,FILUSDT,5m,0.521,1.007,0.49,1650,47,1.0,365,,filtered
 volume_surge,FILUSDT,15m,0.52,1.029,0.48,709,22,0.36,365,,filtered
 vol_burst_revert,AVAXUSDT,5m,0.515,1.007,0.49,854,47,0.3,365,,filtered
 spike_bb,APTUSDT,5m,0.507,1.018,0.48,218,47,0.34,365,,filtered
