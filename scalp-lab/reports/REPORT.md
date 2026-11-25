@@ -13,7 +13,7 @@ maker = вход лимитными ордерами (0.02%), taker = по ры�
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 1 | vol_burst_revert* | ARBUSDT | 15m | 2.49 | 1.06 | 2.3 | 209 | 0.6 | +0.247% | +7.67% | $+77 | 100% | maker |
 | 2 | bb_maker* | NEARUSDT | 5m | 2.37 | 1.03 | 2.2 | 3787 | 10.4 | +0.297% | +9.32% | $+93 | 100% | maker |
-| 3 | vol_burst_revert | ARBUSDT | 5m | 1.96 | 1.03 | 1.9 | 689 | 1.9 | +0.212% | +6.55% | $+65 | 100% | maker |
+| 3 | vol_burst_revert* | ARBUSDT | 5m | 2.19 | 1.03 | 2.1 | 619 | 1.7 | +0.255% | +7.95% | $+79 | 100% | maker |
 | 4 | spike_revert | SUIUSDT | 15m | 1.86 | 1.08 | 1.7 | 290 | 0.8 | +0.147% | +4.50% | $+45 | 100% | maker |
 | 5 | wick_vol | FILUSDT | 5m | 1.86 | 1.03 | 1.8 | 1120 | 3.1 | +0.222% | +6.88% | $+69 | 100% | maker |
 | 6 | wick_vol | OPUSDT | 15m | 1.65 | 1.07 | 1.5 | 275 | 0.8 | +0.132% | +4.04% | $+40 | 100% | maker |
@@ -53,7 +53,7 @@ maker = вход лимитными ордерами (0.02%), taker = по ры�
 | streak_bb | 5m | 1 | 1.44 | 1.01 | 1 | maker |
 | streak_vol | 15m | 2 | 1.22 | 1.04 | 2 | maker |
 | vol_burst_revert | 15m | 1 | 2.49 | 1.06 | 1 | maker |
-| vol_burst_revert | 5m | 2 | 1.57 | 1.03 | 2 | maker |
+| vol_burst_revert | 5m | 2 | 1.68 | 1.02 | 2 | maker |
 | vol_drift | 15m | 1 | 1.29 | 1.04 | 1 | taker |
 | vwap_reversion | 15m | 1 | 1.15 | 1.03 | 1 | maker |
 | vwap_reversion | 5m | 1 | 1.08 | 1.02 | 1 | maker |
