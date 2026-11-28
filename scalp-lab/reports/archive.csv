@@ -2,7 +2,6 @@ strategy,symbol,tf,oos_sharpe,oos_pf,oos_t,trades,folds,param_stability,days,wav
 spike_bb,ATOMUSDT,1m,4.278,1.282,2.79,67,31,0.45,180,,filtered
 spike_bb,LINKUSDT,1m,2.824,1.2,1.84,50,31,0.32,180,,filtered
 crash_revert,XRPUSDT,15m,2.596,1.221,2.39,50,22,0.23,365,,filtered
-vol_burst_revert,ARBUSDT,15m,2.49,1.059,2.29,209,22,1.0,365,,passed
 crash_revert,ARBUSDT,1m,2.378,1.394,1.55,16,31,0.35,180,,filtered
 bb_maker,NEARUSDT,5m,2.367,1.028,2.25,3787,47,1.0,365,,passed
 crash_revert,SUIUSDT,1m,2.26,1.499,1.47,14,31,0.48,180,,filtered
@@ -14,7 +13,6 @@ spike_bb,FILUSDT,1m,2.119,1.125,1.38,86,31,0.45,180,,filtered
 crash_revert,SOLUSDT,5m,2.042,1.252,1.94,39,47,0.3,365,,filtered
 spike_follow,SOLUSDT,1m,2.041,1.111,1.33,92,31,0.42,180,,filtered
 spike_bb,BNBUSDT,5m,1.865,1.178,1.77,53,47,0.34,365,,filtered
-spike_revert,SUIUSDT,15m,1.859,1.077,1.71,290,22,1.0,365,,passed
 wick_vol,FILUSDT,5m,1.857,1.025,1.76,1120,47,1.0,365,,passed
 crash_revert,BTCUSDT,5m,1.811,1.454,1.72,8,47,0.57,365,,filtered
 spike_follow,BTCUSDT,15m,1.805,1.123,1.66,97,22,0.18,365,,filtered
@@ -112,6 +110,7 @@ spike_bb,ADAUSDT,5m,0.833,1.038,0.79,178,47,0.36,365,,filtered
 spike_follow,FILUSDT,5m,0.813,1.029,0.77,448,47,0.26,365,,filtered
 vol_burst_revert,PEPEUSDT,5m,0.804,1.011,0.76,992,47,0.28,365,,filtered
 crash_revert,SOLUSDT,15m,0.784,1.076,0.72,55,22,0.23,365,,filtered
+vol_burst_revert,ARBUSDT,15m,0.78,1.023,0.72,203,22,1.0,365,,filtered
 spike_bb,PEPEUSDT,1m,0.78,1.034,0.51,99,31,0.32,180,,filtered
 funding_revert,ADAUSDT,15m,0.779,1.019,0.72,385,22,0.36,365,,filtered
 streak_vol,LTCUSDT,15m,0.773,1.027,0.71,369,22,0.18,365,,filtered
@@ -351,6 +350,7 @@ wick_vol,AVAXUSDT,15m,-0.054,0.999,-0.05,315,22,1.0,365,,filtered
 vol_burst_revert,BNBUSDT,15m,-0.055,0.998,-0.05,271,22,0.32,365,,filtered
 bollinger_reversion,FILUSDT,1m,-0.063,1.0,-0.04,5167,31,0.42,180,,filtered
 bb_regime,ADAUSDT,5m,-0.063,0.999,-0.06,981,47,0.26,365,,filtered
+spike_revert,SUIUSDT,15m,-0.066,0.994,-0.06,48,22,1.0,365,,filtered
 bb_maker,APTUSDT,5m,-0.075,0.999,-0.07,1768,47,0.28,365,,filtered
 spike_revert,UNIUSDT,5m,-0.076,0.997,-0.07,163,47,0.23,365,,filtered
 funding_revert,ATOMUSDT,15m,-0.077,0.998,-0.07,421,22,0.32,365,,filtered
